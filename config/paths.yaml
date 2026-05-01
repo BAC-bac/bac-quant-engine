@@ -1,0 +1,10 @@
+data_lake_root: "E:/Quant_Lab"
+
+greyhounds:
+  raw_results: "E:/Quant_Lab/raw/Greyhound Racing"
+  raw_tips: "E:/Quant_Lab/greyhounds/raw/tips"
+  staging: "E:/Quant_Lab/staging/greyhounds"
+  interim: "E:/Quant_Lab/greyhounds/interim"
+  curated: "E:/Quant_Lab/greyhounds/curated"
+  reports: "E:/Quant_Lab/reports/greyhounds"
+  meta: "E:/Quant_Lab/greyhounds/meta"
