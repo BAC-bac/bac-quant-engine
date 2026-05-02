@@ -84,6 +84,10 @@ def main() -> None:
 
     df = pd.read_csv(INPUT_FILE)
 
+    exclude_terms = ["World", "Advanced Economies", "Emerging Market", "ASEAN", "Euro Area", "G20", "G7", ]
+
+    df = df[~df["COUNTRY"].str.contains("|".join(exclude_terms), case=False, na=False)].copy().reset_index(drop=True)
+
     features_df = create_features(df)
 
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
