@@ -1,0 +1,27 @@
+uk_tracks:
+  - central park
+  - crayford
+  - doncaster
+  - harlow
+  - henlow
+  - monmore
+  - newcastle
+  - nottingham
+  - oxford
+  - pelaw grange
+  - perry barr
+  - romford
+  - sheffield
+  - sunderland
+  - swindon
+  - towcester
+  - yarmouth
+  - hove
+
+aliases:
+  "brighton & hove": "hove"
+  "brighton and hove": "hove"
+  "monmore green": "monmore"
+  "pelaw": "pelaw grange"
+  "newcastle bags": "newcastle"
+  "romford bags": "romford"
