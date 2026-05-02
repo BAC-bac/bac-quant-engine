@@ -4,6 +4,7 @@ uk_tracks:
   - doncaster
   - harlow
   - henlow
+  - hove
   - monmore
   - newcastle
   - nottingham
@@ -16,12 +17,15 @@ uk_tracks:
   - swindon
   - towcester
   - yarmouth
-  - hove
 
 aliases:
-  "brighton & hove": "hove"
-  "brighton and hove": "hove"
-  "monmore green": "monmore"
-  "pelaw": "pelaw grange"
-  "newcastle bags": "newcastle"
-  "romford bags": "romford"
+  brighton & hove: hove
+  brighton and hove: hove
+  monmore green: monmore
+  pelaw: pelaw grange
+  newcastle bags: newcastle
+  romford bags: romford
+  crayford bags: crayford
+  sunderland bags: sunderland
+  sheffield bags: sheffield
+  nottingham bags: nottingham

@@ -5,34 +5,14 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PATHS_CONFIG = PROJECT_ROOT / "config" / "paths.yaml"
+TRACKS_CONFIG = PROJECT_ROOT / "config" / "greyhound_tracks.yaml"
 
 
-UK_TRACKS = {
-    "central park",
-    "crayford",
-    "doncaster",
-    "harlow",
-    "henlow",
-    "kilmarnock",
-    "monmore",
-    "newcastle",
-    "nottingham",
-    "oxford",
-    "pelaw grange",
-    "perry barr",
-    "romford",
-    "sheffield",
-    "sunderland",
-    "swindon",
-    "towcester",
-    "yarmouth",
-    "hove",
-    "brighton and hove",
-}
+def load_yaml(path: Path) -> dict:
+    if not path.exists():
+        raise FileNotFoundError(f"Missing config file: {path}")
 
-
-def load_paths() -> dict:
-    with open(PATHS_CONFIG, "r", encoding="utf-8") as file:
+    with open(path, "r", encoding="utf-8") as file:
         return yaml.safe_load(file)
 
 
@@ -41,39 +21,36 @@ def normalise_text(value):
         return None
 
     text = str(value).lower().strip()
-
-    replacements = {
-        "brighton & hove": "brighton and hove",
-        "pelaw": "pelaw grange",
-        "newcastle bags": "newcastle",
-        "romford bags": "romford",
-        "crayford bags": "crayford",
-        "monmore green": "monmore",
-        "sunderland bags": "sunderland",
-        "sheffield bags": "sheffield",
-        "nottingham bags": "nottingham",
-    }
-
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-
+    text = text.replace("\\", "/")
     text = text.replace("(uk)", "")
     text = text.replace("  ", " ")
-    text = text.strip()
 
-    return text
+    return text.strip()
 
 
-def derive_track_key(row):
+def apply_aliases(text, aliases: dict):
+    if text is None:
+        return None
+
+    for old, new in aliases.items():
+        if old in text:
+            text = text.replace(old, new)
+
+    return text.strip()
+
+
+def derive_track_key(row, uk_tracks: set, aliases: dict):
     track_clean = normalise_text(row.get("track_clean"))
+    track_clean = apply_aliases(track_clean, aliases)
 
-    if track_clean in UK_TRACKS:
+    if track_clean in uk_tracks:
         return track_clean
 
     menu_hint = normalise_text(row.get("menu_hint"))
+    menu_hint = apply_aliases(menu_hint, aliases)
 
     if menu_hint:
-        for track in UK_TRACKS:
+        for track in uk_tracks:
             if track in menu_hint:
                 return track
 
@@ -92,8 +69,13 @@ def fix_is_winner(value):
 def main() -> None:
     print("Starting UK greyhound results filter...")
 
-    paths = load_paths()
+    paths = load_yaml(PATHS_CONFIG)
+    track_config = load_yaml(TRACKS_CONFIG)
+
     greyhound_paths = paths["greyhounds"]
+
+    uk_tracks = set(track_config["uk_tracks"])
+    aliases = track_config.get("aliases", {})
 
     curated_dir = Path(greyhound_paths["curated"])
     reports_dir = Path(greyhound_paths["reports"])
@@ -110,8 +92,13 @@ def main() -> None:
     df = pd.read_parquet(input_path)
 
     print(f"Rows before UK filter: {len(df):,}")
+    print(f"UK tracks in config: {len(uk_tracks):,}")
+    print(f"Aliases in config: {len(aliases):,}")
 
-    df["track_key"] = df.apply(derive_track_key, axis=1)
+    df["track_key"] = df.apply(
+        lambda row: derive_track_key(row, uk_tracks, aliases),
+        axis=1,
+    )
 
     if "win_lose" in df.columns:
         df["is_winner"] = df["win_lose"].apply(fix_is_winner)
@@ -154,7 +141,7 @@ def main() -> None:
     print(f"Saved unmapped sample to: {unmapped_path}")
 
     print("\nUK track counts preview:")
-    print(uk_track_counts.head(20))
+    print(uk_track_counts.head(25))
 
     print("\nWinner check:")
     print(uk_df["is_winner"].value_counts(dropna=False).head())
