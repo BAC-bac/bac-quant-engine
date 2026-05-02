@@ -4,7 +4,7 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-RAW_FILE = PROJECT_ROOT / "macro_data" / "raw" / "imf_weo_debt.csv"
+RAW_FILE = PROJECT_ROOT / "macro_data" / "raw" / "imf_weo_2026_macro.csv"
 OUTPUT_FILE = PROJECT_ROOT / "macro_data" / "processed" / "debt_to_gdp_long.csv"
 
 
