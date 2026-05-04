@@ -1,10 +1,15 @@
-data_lake_root: "E:/Quant_Lab"
+data_lake_root:
+  windows: "E:/Quant_Lab"
+  linux: "/mnt/quant_lab"
 
 greyhounds:
-  raw_results: "E:/Quant_Lab/raw/Greyhound Racing"
-  raw_tips: "E:/Quant_Lab/greyhounds/raw/tips"
-  staging: "E:/Quant_Lab/staging/greyhounds"
-  interim: "E:/Quant_Lab/greyhounds/interim"
-  curated: "E:/Quant_Lab/greyhounds/curated"
-  reports: "E:/Quant_Lab/reports/greyhounds"
-  meta: "E:/Quant_Lab/greyhounds/meta"
+  raw_results: "greyhounds/raw/results"
+  raw_tips: "greyhounds/raw/tips"
+  raw_preoff_prices: "greyhounds/raw/preoff_prices"
+  staging: "greyhounds/staging"
+  interim: "greyhounds/interim"
+  curated: "greyhounds/curated"
+  reports: "greyhounds/reports"
+  meta: "greyhounds/meta"
+  logs: "greyhounds/logs"
+
