@@ -7,8 +7,8 @@ import requests
 
 
 RAW_BASE = Path("/mnt/quant_lab/raw/Greyhound Racing")
-START_DATE = date(2026, 3, 5)
-END_DATE = date(2026, 3, 5)
+START_DATE = date(2026, 3, 6)
+END_DATE = date.today() - timedelta(days=1)
 MARKETS = ["win", "place"]
 TIMEOUT = 30
 
