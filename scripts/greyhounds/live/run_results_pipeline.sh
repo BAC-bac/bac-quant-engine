@@ -4,7 +4,7 @@ set -euo pipefail
 LOG_FILE="/mnt/quant_lab/meta/run_logs/pipeline_status.csv"
 TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
 
-echo "$TIMESTAMP,results_pipeline,STARTED" >> $LOG_FILE
+echo "$TIMESTAMP,results_pipeline,STARTED" >> "$LOG_FILE"
 
 {
     cd /home/ben/bac-quant-engine
@@ -17,8 +17,10 @@ echo "$TIMESTAMP,results_pipeline,STARTED" >> $LOG_FILE
     python /home/ben/PycharmProjects/greyhound_tips_ingest/scripts/04_build_race_features.py
     python /home/ben/PycharmProjects/greyhound_tips_ingest/scripts/03_merge_tips_results.py
 
-    echo "$TIMESTAMP,results_pipeline,SUCCESS" >> $LOG_FILE
+    python /home/ben/bac-quant-engine/scripts/greyhounds/live/02_validate_live_outputs.py
+
+    echo "$(date '+%Y-%m-%d %H:%M:%S'),results_pipeline,SUCCESS" >> "$LOG_FILE"
 } || {
-    echo "$TIMESTAMP,results_pipeline,FAILED" >> $LOG_FILE
+    echo "$(date '+%Y-%m-%d %H:%M:%S'),results_pipeline,FAILED" >> "$LOG_FILE"
     exit 1
 }
