@@ -9,6 +9,7 @@ echo "$TIMESTAMP,results_pipeline,STARTED" >> "$LOG_FILE"
 {
     cd /home/ben/bac-quant-engine
     source /home/ben/PycharmProjects/greyhound_tips_ingest/.venv/bin/activate
+    python /home/ben/bac-quant-engine/scripts/greyhounds/ingest/12b_fetch_betfair_results_daily.py
 
     rsync -a --ignore-existing "/mnt/d_drive/Greyhound Racing/" "/mnt/quant_lab/raw/Greyhound Racing/"
 
