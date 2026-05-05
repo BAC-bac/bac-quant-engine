@@ -23,9 +23,9 @@ FX_PAIRS = {
 
 
 def classify_bias(diff: float) -> str:
-    if diff <= -0.5:
+    if diff >= 0.3:
         return "bullish_base"
-    elif diff >= 0.5:
+    elif diff <= -0.3:
         return "bearish_base"
     return "neutral"
 
