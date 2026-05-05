@@ -10,8 +10,7 @@ echo "$TIMESTAMP,rpg_ingest,STARTED" >> $LOG_FILE
     cd /home/ben/bac-quant-engine
     source /home/ben/PycharmProjects/greyhound_tips_ingest/.venv/bin/activate
 
-    python /home/ben/PycharmProjects/greyhound_tips_ingest/greyhound_tips_daily_ingest.py >> /home/ben/PycharmProjects/greyhound_tips_ingest/cron.log 2>&1
-
+    python /home/ben/bac-quant-engine/scripts/greyhounds/ingest/greyhound_tips_daily_ingest.py >> /mnt/quant_lab/meta/run_logs/rpg_ingest_detail.log 2>&1
     echo "$TIMESTAMP,rpg_ingest,SUCCESS" >> $LOG_FILE
 } || {
     echo "$TIMESTAMP,rpg_ingest,FAILED" >> $LOG_FILE
