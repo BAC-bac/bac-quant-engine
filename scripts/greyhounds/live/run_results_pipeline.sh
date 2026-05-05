@@ -8,7 +8,7 @@ echo "$TIMESTAMP,results_pipeline,STARTED" >> $LOG_FILE
 
 {
     cd /home/ben/bac-quant-engine
-    source .venv/bin/activate
+    source /home/ben/PycharmProjects/greyhound_tips_ingest/.venv/bin/activate
 
     rsync -a --ignore-existing "/mnt/d_drive/Greyhound Racing/" "/mnt/quant_lab/raw/Greyhound Racing/"
 
