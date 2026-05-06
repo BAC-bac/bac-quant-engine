@@ -1,18 +1,206 @@
+broker: FTMO
+data_source: MT5
+storage_format: parquet
+data_root: E:/Quant_Lab/data/raw/fx/mt5_ohlcv/FTMO
 forex:
-  - GBPUSD
-  - EURUSD
-  - USDJPY
-  - EURGBP
-  - GBPJPY
-
+- AUDCAD
+- AUDCHF
+- AUDJPY
+- AUDNZD
+- AUDUSD
+- CADCHF
+- CADJPY
+- CHFJPY
+- EURAUD
+- EURCAD
+- EURCHF
+- EURGBP
+- EURJPY
+- EURNZD
+- EURUSD
+- GBPAUD
+- GBPCAD
+- GBPCHF
+- GBPJPY
+- GBPNZD
+- GBPUSD
+- NZDCAD
+- NZDCHF
+- NZDJPY
+- NZDUSD
+- USDCAD
+- USDCHF
+- USDJPY
+exotics:
+- EURCZK
+- EURHUF
+- EURNOK
+- EURPLN
+- USDCNH
+- USDCZK
+- USDHKD
+- USDHUF
+- USDILS
+- USDMXN
+- USDNOK
+- USDPLN
+- USDSEK
+- USDSGD
+- USDZAR
 metals:
-  - XAUUSD
-
-indices: []
-
-crypto: []
-
+- XAGAUD
+- XAGEUR
+- XAGUSD
+- XAUAUD
+- XAUEUR
+- XAUUSD
+- XCUUSD
+- XPDUSD
+- XPTUSD
+commodities:
+- HEATOIL.c
+- NATGAS.cash
+agriculture:
+- COCOA.c
+- COFFEE.c
+- CORN.c
+- COTTON.c
+- SOYBEAN.c
+- SUGAR.c
+- WHEAT.c
+indices_cash_1: []
+indices_cash_2:
+- AUS200.cash
+- EU50.cash
+- FRA40.cash
+- HK50.cash
+- JP225.cash
+- N25.cash
+- SPN35.cash
+- UKOIL.cash
+- US2000.cash
+- USOIL.cash
+indices_cash_3:
+- DXY.cash
+crypto_1:
+- ADAUSD
+- AVAUSD
+- BCHUSD
+- BTCUSD
+- DASHUSD
+- DOTUSD
+- ETCUSD
+- ETHUSD
+- LTCUSD
+- SOLUSD
+- XRPUSD
+crypto_2:
+- AAVUSD
+- ALGUSD
+- BARUSD
+- BNBUSD
+- DOGEUSD
+- FETUSD
+- GALUSD
+- GRTUSD
+- ICPUSD
+- IMXUSD
+- LNKUSD
+- MANUSD
+- NEOUSD
+- NERUSD
+- SANUSD
+- UNIUSD
+- VECUSD
+- XLMUSD
+- XMRUSD
+- XTZUSD
+equities_1:
+- AAPL
+- AMD
+- AMZN
+- ARM
+- ASML
+- AVGO
+- AZN
+- BA
+- BABA
+- BAC
+- BRK.B
+- CSCO
+- CVX
+- DIS
+- FDX
+- GE
+- GM
+- GME
+- GOOG
+- IBM
+- INTC
+- JNJ
+- JPM
+- KO
+- LMT
+- MCD
+- META
+- MSFT
+- MSTR
+- NFLX
+- NKE
+- NVDA
+- PFE
+- PLTR
+- QCOM
+- RACE
+- RTX
+- SBUX
+- SNOW
+- T
+- TSLA
+- V
+- WMT
+- XOM
+- ZM
+equities_2:
+- ADSGn
+- AIRF
+- ALVG
+- BAYGn
+- BMW
+- DBKGn
+- IBE
+- LVMH
+- MBG
+- SAN
+- SIEGn
+- TTE
+- VOWG_p
+other:
+- GER40.cash
+- UK100.cash
+- US100.cash
+- US30.cash
+- US500.cash
 timeframes:
-  - H1
-  - H4
-  - D1
+- M1
+- M2
+- M3
+- M5
+- M10
+- M15
+- M30
+- H1
+- H2
+- H3
+- H4
+- H8
+- H12
+- D1
+- W1
+- MN1
+download:
+  chunk_size: 5000
+  sleep_seconds: 0.05
+  skip_existing: false
+  max_symbols: null
+  max_timeframes: null
