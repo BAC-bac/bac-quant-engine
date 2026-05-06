@@ -6,7 +6,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 MACRO_SCORE_FILE = PROJECT_ROOT / "macro_data" / "processed" / "sovereign_weighted_scores_v3.csv"
-RATES_FILE = PROJECT_ROOT / "macro_data" / "processed" / "rates_yields_snapshot.csv"
+RATES_FILE = PROJECT_ROOT / "macro_data" / "processed" / "rates_yields_snapshot_with_bonds.csv"
 OUTPUT_FILE = PROJECT_ROOT / "macro_data" / "processed" / "sovereign_weighted_scores_v4_rates.csv"
 
 

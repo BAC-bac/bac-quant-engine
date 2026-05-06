@@ -8,7 +8,7 @@ Stage 01: Download OHLCV market data from MetaTrader 5.
 Purpose:
 - Connect to MetaTrader 5
 - Download OHLCV bars for selected symbols and timeframes
-- Save files into BACQE market_data structure
+- Save files as Parquet into the Quant Lab data lake
 - Support full first download and incremental updates
 """
 
@@ -30,11 +30,10 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = PROJECT_ROOT / "config" / "market_universe.yaml"
 
-DATA_ROOT = PROJECT_ROOT / "market_data"
-OHLCV_DIR = DATA_ROOT / "ohlcv"
-LOG_DIR = DATA_ROOT / "logs"
+DATA_ROOT = Path("E:/Quant_Lab/data/raw/fx/mt5_ohlcv/FTMO")
+LOG_DIR = PROJECT_ROOT / "logs" / "regimes"
 
-OHLCV_DIR.mkdir(parents=True, exist_ok=True)
+DATA_ROOT.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -146,7 +145,13 @@ def fetch_incremental(
 def normalise_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    if "time" not in df.columns:
+        raise ValueError(f"Missing 'time' column. Columns returned: {df.columns.tolist()}")
+
+    if not pd.api.types.is_datetime64_any_dtype(df["time"]):
+        df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    else:
+        df["time"] = pd.to_datetime(df["time"], utc=True)
 
     keep_cols = [
         "time",
@@ -161,7 +166,12 @@ def normalise_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 
     existing_cols = [col for col in keep_cols if col in df.columns]
 
-    return df[existing_cols].sort_values("time").drop_duplicates(subset=["time"])
+    return (
+        df[existing_cols]
+        .sort_values("time")
+        .drop_duplicates(subset=["time"])
+        .reset_index(drop=True)
+    )
 
 
 # ============================================================
@@ -172,7 +182,8 @@ def main() -> None:
     logger.info("Starting BACQE Regime Engine market data download")
     logger.info(f"Project root: {PROJECT_ROOT}")
     logger.info(f"Config path: {CONFIG_PATH}")
-    logger.info(f"Output folder: {OHLCV_DIR}")
+    logger.info(f"Output root: {DATA_ROOT}")
+    logger.info(f"Log folder: {LOG_DIR}")
 
     symbols, timeframes = load_market_universe(CONFIG_PATH)
 
@@ -199,7 +210,10 @@ def main() -> None:
                     logger.warning(f"Skipping unsupported timeframe: {tf_name}")
                     continue
 
-                output_path = OHLCV_DIR / f"{symbol}_{tf_name}.csv"
+                output_dir = DATA_ROOT / tf_name
+                output_dir.mkdir(parents=True, exist_ok=True)
+
+                output_path = output_dir / f"{symbol}_{tf_name}.parquet"
 
                 try:
                     full_download = not output_path.exists()
@@ -208,7 +222,7 @@ def main() -> None:
                         logger.info(f"{symbol} {tf_name}: first run, downloading full history")
                         df_new = fetch_full_history(symbol, mt5_tf)
                     else:
-                        df_existing = pd.read_csv(output_path)
+                        df_existing = pd.read_parquet(output_path)
 
                         if df_existing.empty:
                             logger.info(f"{symbol} {tf_name}: existing file empty, downloading full history")
@@ -229,18 +243,19 @@ def main() -> None:
                     df_new = normalise_ohlcv(df_new)
 
                     if output_path.exists() and not full_download:
-                        df_existing = pd.read_csv(output_path)
-                        df_existing["time"] = pd.to_datetime(df_existing["time"], utc=True)
+                        df_existing = pd.read_parquet(output_path)
+                        df_existing = normalise_ohlcv(df_existing)
 
                         df_final = (
                             pd.concat([df_existing, df_new], ignore_index=True)
                             .drop_duplicates(subset=["time"])
                             .sort_values("time")
+                            .reset_index(drop=True)
                         )
                     else:
                         df_final = df_new
 
-                    df_final.to_csv(output_path, index=False)
+                    df_final.to_parquet(output_path, index=False)
 
                     logger.info(
                         f"{symbol} {tf_name}: saved {len(df_final)} bars -> {output_path}"
