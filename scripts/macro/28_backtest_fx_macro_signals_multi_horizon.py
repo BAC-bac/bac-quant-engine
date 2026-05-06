@@ -6,29 +6,25 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 SIGNALS_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_signals_v4.csv"
-PRICE_DIR = Path(r"E:\BAC_Quant_Universe\data\mt5_ohlcv\FTMO\H1")
+PRICE_DIR = Path(r"E:\BAC_Quant_Universe\data\mt5_ohlcv\FTMO\D1")
 
-OUTPUT_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v4_multi_horizon_h1.csv"
-SUMMARY_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v4_multi_horizon_summary.csv"
+OUTPUT_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v4_multi_horizon_d1.csv"
+SUMMARY_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v4_multi_horizon_d1_summary.csv"
 
 
 HORIZONS = {
-    "1h": 1,
-    "6h": 6,
-    "24h": 24,
-    "72h": 72,
-    "120h": 120,
-    "240h": 240,
+    "1d": 1,
+    "5d": 5,
+    "20d": 20,
+    "60d": 60,
+    "120d": 120,
+    "252d": 252,
 }
 
 
 def find_price_file(pair: str) -> Path | None:
     matches = list(PRICE_DIR.glob(f"*{pair}*.parquet"))
-
-    if matches:
-        return matches[0]
-
-    return None
+    return matches[0] if matches else None
 
 
 def signal_to_direction(signal: str) -> int:
@@ -126,9 +122,7 @@ def summarise_results(results: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
-    summary["simple_score"] = (
-        summary["win_rate"] * summary["avg_signal_return"]
-    )
+    summary["simple_score"] = summary["win_rate"] * summary["avg_signal_return"]
 
     return summary.sort_values(["horizon_bars", "total_signal_return"], ascending=[True, False])
 
@@ -150,7 +144,7 @@ def main() -> None:
         price_file = find_price_file(pair)
 
         if price_file is None:
-            print(f"[WARN] {pair}: no parquet price file found")
+            print(f"[WARN] {pair}: no D1 parquet price file found")
             continue
 
         print(f"[RUN] {pair}: {signal} using {price_file}")
@@ -165,7 +159,7 @@ def main() -> None:
         all_results.append(pair_results)
 
     if not all_results:
-        print("\nNo backtest results generated.")
+        print("\nNo D1 backtest results generated.")
         return
 
     results = pd.concat(all_results, ignore_index=True)
@@ -174,10 +168,10 @@ def main() -> None:
     results.to_csv(OUTPUT_FILE, index=False)
     summary.to_csv(SUMMARY_FILE, index=False)
 
-    print(f"\nSaved detailed results to: {OUTPUT_FILE}")
-    print(f"Saved summary results to:  {SUMMARY_FILE}")
+    print(f"\nSaved detailed D1 results to: {OUTPUT_FILE}")
+    print(f"Saved summary D1 results to:  {SUMMARY_FILE}")
 
-    print("\nSummary preview:")
+    print("\nD1 summary preview:")
     print(summary.to_string(index=False))
 
 

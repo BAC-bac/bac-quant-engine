@@ -6,33 +6,22 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 SIGNALS_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_signals_v4.csv"
-OUTPUT_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v4_local_h1.csv"
+OUTPUT_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v4_local_d1.csv"
 
-PRICE_DIR = Path(r"E:\BAC_Quant_Universe\data\mt5_ohlcv\FTMO\H1")
-
-
-PAIR_FILES = {
-    "GBPUSD": "GBPUSD.parquet",
-    "EURUSD": "EURUSD.parquet",
-    "USDJPY": "USDJPY.parquet",
-    "EURGBP": "EURGBP.parquet",
-    "EURJPY": "EURJPY.parquet",
-    "GBPJPY": "GBPJPY.parquet",
-}
+PRICE_DIR = Path(r"E:\BAC_Quant_Universe\data\mt5_ohlcv\FTMO\D1")
 
 
 def find_price_file(pair: str) -> Path | None:
-    expected = PRICE_DIR / PAIR_FILES[pair]
-
-    if expected.exists():
-        return expected
-
     matches = list(PRICE_DIR.glob(f"*{pair}*.parquet"))
+    return matches[0] if matches else None
 
-    if matches:
-        return matches[0]
 
-    return None
+def signal_to_direction(signal: str) -> int:
+    if "BUY" in signal:
+        return 1
+    if "SELL" in signal:
+        return -1
+    return 0
 
 
 def load_price_data(path: Path) -> pd.DataFrame:
@@ -40,8 +29,8 @@ def load_price_data(path: Path) -> pd.DataFrame:
 
     df.columns = df.columns.str.lower().str.strip()
 
-    possible_time_cols = ["time", "datetime", "date", "timestamp"]
-    time_col = next((col for col in possible_time_cols if col in df.columns), None)
+    time_candidates = ["time", "datetime", "date", "timestamp"]
+    time_col = next((col for col in time_candidates if col in df.columns), None)
 
     if time_col is not None:
         df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
@@ -53,19 +42,12 @@ def load_price_data(path: Path) -> pd.DataFrame:
     df["close"] = pd.to_numeric(df["close"], errors="coerce")
     df = df.dropna(subset=["close"])
 
-    df["return_1h"] = df["close"].pct_change()
-    df["return_24h"] = df["close"].pct_change(24)
-    df["return_120h"] = df["close"].pct_change(120)
+    df["return_1d"] = df["close"].pct_change()
+    df["return_5d"] = df["close"].pct_change(5)
+    df["return_20d"] = df["close"].pct_change(20)
+    df["return_60d"] = df["close"].pct_change(60)
 
     return df
-
-
-def signal_to_direction(signal: str) -> int:
-    if "BUY" in signal:
-        return 1
-    if "SELL" in signal:
-        return -1
-    return 0
 
 
 def main() -> None:
@@ -75,56 +57,54 @@ def main() -> None:
 
     for _, row in signals.iterrows():
         pair = row["pair"]
+        signal = row["signal_v4"]
+        direction = signal_to_direction(signal)
 
-        if pair not in PAIR_FILES:
-            print(f"[SKIP] No local file mapping for {pair}")
+        if direction == 0:
+            print(f"[SKIP] {pair}: neutral signal")
             continue
 
         price_file = find_price_file(pair)
 
         if price_file is None:
-            print(f"[WARN] No price file found for {pair}")
+            print(f"[WARN] No D1 parquet price file found for {pair}")
             continue
 
         df = load_price_data(price_file)
-
         latest = df.iloc[-1]
-
-        direction = signal_to_direction(row["signal_v4"])
-
-        pnl_1h = direction * latest["return_1h"]
-        pnl_24h = direction * latest["return_24h"]
-        pnl_120h = direction * latest["return_120h"]
 
         results.append(
             {
                 "pair": pair,
-                "signal_v4": row["signal_v4"],
+                "signal_v4": signal,
                 "direction": direction,
                 "price_file": str(price_file),
                 "latest_close": latest["close"],
-                "return_1h": latest["return_1h"],
-                "return_24h": latest["return_24h"],
-                "return_120h": latest["return_120h"],
-                "signal_pnl_1h": pnl_1h,
-                "signal_pnl_24h": pnl_24h,
-                "signal_pnl_120h": pnl_120h,
+                "return_1d": latest["return_1d"],
+                "return_5d": latest["return_5d"],
+                "return_20d": latest["return_20d"],
+                "return_60d": latest["return_60d"],
+                "signal_pnl_1d": direction * latest["return_1d"],
+                "signal_pnl_5d": direction * latest["return_5d"],
+                "signal_pnl_20d": direction * latest["return_20d"],
+                "signal_pnl_60d": direction * latest["return_60d"],
             }
         )
 
     output = pd.DataFrame(results)
 
-    print("\nLocal FX macro signal backtest:")
+    print("\nLocal D1 FX macro signal snapshot validation:")
     print(output.to_string(index=False))
 
     if not output.empty:
         print("\nSummary:")
-        print(f"Total signal PnL 1H:   {output['signal_pnl_1h'].sum():.6f}")
-        print(f"Total signal PnL 24H:  {output['signal_pnl_24h'].sum():.6f}")
-        print(f"Total signal PnL 120H: {output['signal_pnl_120h'].sum():.6f}")
+        print(f"Total signal PnL 1D:  {output['signal_pnl_1d'].sum():.6f}")
+        print(f"Total signal PnL 5D:  {output['signal_pnl_5d'].sum():.6f}")
+        print(f"Total signal PnL 20D: {output['signal_pnl_20d'].sum():.6f}")
+        print(f"Total signal PnL 60D: {output['signal_pnl_60d'].sum():.6f}")
 
     output.to_csv(OUTPUT_FILE, index=False)
-    print(f"\nSaved local FX backtest to: {OUTPUT_FILE}")
+    print(f"\nSaved local D1 FX backtest to: {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
