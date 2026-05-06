@@ -1,0 +1,18 @@
+forex:
+  - GBPUSD
+  - EURUSD
+  - USDJPY
+  - EURGBP
+  - GBPJPY
+
+metals:
+  - XAUUSD
+
+indices: []
+
+crypto: []
+
+timeframes:
+  - H1
+  - H4
+  - D1

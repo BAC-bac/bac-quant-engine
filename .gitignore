@@ -16,3 +16,4 @@ __pycache__/
 
 logs/
 outputs/
+market_data/
