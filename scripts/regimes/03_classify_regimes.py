@@ -5,6 +5,8 @@
 BAC Quant Engine - Regime Engine
 Stage 03: Classify market regimes from feature parquet files.
 
+Classifier logic: v2
+
 Purpose:
 - Read regime feature files
 - Classify trend, volatility, momentum and composite regimes
@@ -112,62 +114,108 @@ def classify_trend_strength(row: pd.Series) -> str:
 def classify_composite(row: pd.Series) -> str:
     trend = row["trend_state"]
     volatility = row["volatility_state"]
+    momentum = row["momentum_state"]
     strength = row["trend_strength_state"]
 
-    if trend == "bull_trend" and volatility == "high_volatility":
-        return "bull_trend_high_vol"
+    # 1. Weak-trend environments should be classified as range/transition first.
+    # This prevents the composite label from becoming too trend-dominant.
+    if strength == "weak_trend":
+        if volatility == "low_volatility":
+            return "quiet_range"
 
-    if trend == "bull_trend" and volatility == "normal_volatility":
+        if volatility == "high_volatility":
+            return "volatile_range"
+
+        return "range"
+
+    # 2. Moderate trends with conflicting momentum are transitional.
+    if strength == "moderate_trend":
+        if trend == "bull_trend" and momentum == "bearish_momentum":
+            return "transition"
+
+        if trend == "bear_trend" and momentum == "bullish_momentum":
+            return "transition"
+
+        if trend == "range_or_transition":
+            if volatility == "high_volatility":
+                return "volatile_transition"
+
+            return "transition"
+
+    # 3. Strong aligned trends are the cleanest trend regimes.
+    if trend == "bull_trend":
+        if volatility == "high_volatility":
+            return "bull_trend_high_vol"
+
+        if volatility == "low_volatility":
+            return "bull_trend_low_vol"
+
         return "bull_trend_normal_vol"
 
-    if trend == "bull_trend" and volatility == "low_volatility":
-        return "bull_trend_low_vol"
+    if trend == "bear_trend":
+        if volatility == "high_volatility":
+            return "bear_trend_high_vol"
 
-    if trend == "bear_trend" and volatility == "high_volatility":
-        return "bear_trend_high_vol"
+        if volatility == "low_volatility":
+            return "bear_trend_low_vol"
 
-    if trend == "bear_trend" and volatility == "normal_volatility":
         return "bear_trend_normal_vol"
 
-    if trend == "bear_trend" and volatility == "low_volatility":
-        return "bear_trend_low_vol"
+    # 4. Remaining range/transition cases.
+    if trend == "range_or_transition":
+        if volatility == "high_volatility":
+            return "volatile_transition"
 
-    if trend == "range_or_transition" and volatility == "high_volatility":
-        return "volatile_range_or_transition"
+        if volatility == "low_volatility":
+            return "quiet_range"
 
-    if trend == "range_or_transition" and volatility == "low_volatility":
-        return "quiet_range"
-
-    if strength == "weak_trend":
-        return "range"
+        return "transition"
 
     return "transition"
 
 
 def calculate_regime_score(df: pd.DataFrame) -> pd.Series:
     """
-    Simple confidence score from 0 to 1.
+    Confidence score from 0 to 1.
 
     Higher score = cleaner regime conditions.
     """
-    trend_score = np.where(df["trend_strength_state"] == "strong_trend", 0.35,
-                   np.where(df["trend_strength_state"] == "moderate_trend", 0.22, 0.10))
 
-    vol_score = np.where(df["volatility_state"] == "normal_volatility", 0.25,
-                 np.where(df["volatility_state"] == "high_volatility", 0.20, 0.15))
+    strength_score = np.where(
+        df["trend_strength_state"] == "strong_trend",
+        0.35,
+        np.where(
+            df["trend_strength_state"] == "moderate_trend",
+            0.22,
+            0.12,
+        ),
+    )
 
-    alignment_score = np.where(
+    volatility_score = np.where(
+        df["volatility_state"] == "normal_volatility",
+        0.25,
+        np.where(
+            df["volatility_state"] == "high_volatility",
+            0.20,
+            0.15,
+        ),
+    )
+
+    momentum_alignment_score = np.where(
         (
-            (df["trend_state"] == "bull_trend") &
-            (df["momentum_state"] == "bullish_momentum")
+            (df["trend_state"] == "bull_trend")
+            & (df["momentum_state"] == "bullish_momentum")
         )
-        |
-        (
-            (df["trend_state"] == "bear_trend") &
-            (df["momentum_state"] == "bearish_momentum")
+        | (
+            (df["trend_state"] == "bear_trend")
+            & (df["momentum_state"] == "bearish_momentum")
         ),
         0.25,
-        0.10,
+        np.where(
+            df["trend_state"] == "range_or_transition",
+            0.18,
+            0.10,
+        ),
     )
 
     structure_score = np.where(
@@ -176,7 +224,12 @@ def calculate_regime_score(df: pd.DataFrame) -> pd.Series:
         0.05,
     )
 
-    score = trend_score + vol_score + alignment_score + structure_score
+    score = (
+        strength_score
+        + volatility_score
+        + momentum_alignment_score
+        + structure_score
+    )
 
     return np.clip(score, 0, 1)
 
@@ -232,6 +285,10 @@ def process_file(feature_path: Path) -> bool:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = output_dir / f"{symbol}_{timeframe}_regimes.parquet"
+
+    if output_path.exists():
+        logger.info(f"{symbol} {timeframe}: already classified, skipping")
+        return True
 
     df = pd.read_parquet(feature_path)
 
