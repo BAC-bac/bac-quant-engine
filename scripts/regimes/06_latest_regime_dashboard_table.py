@@ -10,21 +10,21 @@ Purpose:
 - Create a clean dashboard-ready table
 - Rank current market states by risk/opportunity categories
 - Save CSV and Parquet outputs
+- Support timeframe-group processing using --mode full/small/medium/large
 """
 
 from pathlib import Path
 from datetime import datetime
 import logging
 import sys
+import argparse
 
 import pandas as pd
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-FORECAST_PATH = Path(
-    "E:/Quant_Lab/data/analysis/regime_forecasts/FTMO/regime_forecast_latest.parquet"
-)
+FORECAST_DIR = Path("E:/Quant_Lab/data/analysis/regime_forecasts/FTMO")
 
 OUTPUT_ROOT = Path("E:/Quant_Lab/data/analysis/regime_dashboard/FTMO")
 LOG_DIR = PROJECT_ROOT / "logs" / "regimes"
@@ -32,6 +32,41 @@ LOG_DIR = PROJECT_ROOT / "logs" / "regimes"
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+
+# ============================================================
+# TIMEFRAME GROUPS
+# ============================================================
+
+TIMEFRAME_GROUPS = {
+    "small": ["M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15"],
+    "medium": ["M20", "M30", "H1", "H2", "H3", "H4"],
+    "large": ["H6", "H8", "H12", "D1", "W1", "MN1"],
+    "full": None,
+}
+
+
+def get_mode_suffix(mode: str) -> str:
+    return "" if mode == "full" else f"_{mode}"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build BACQE latest regime dashboard by timeframe group."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["full", "small", "medium", "large"],
+        default="full",
+        help="Choose which timeframe group dashboard to build.",
+    )
+
+    return parser.parse_args()
+
+
+# ============================================================
+# LOGGING
+# ============================================================
 
 log_path = LOG_DIR / f"latest_regime_dashboard_{datetime.now():%Y%m%d_%H%M%S}.log"
 
@@ -51,14 +86,19 @@ TIMEFRAME_ORDER = {
     "M1": 1,
     "M2": 2,
     "M3": 3,
+    "M4": 4,
     "M5": 5,
+    "M6": 6,
     "M10": 10,
+    "M12": 12,
     "M15": 15,
+    "M20": 20,
     "M30": 30,
     "H1": 60,
     "H2": 120,
     "H3": 180,
     "H4": 240,
+    "H6": 360,
     "H8": 480,
     "H12": 720,
     "D1": 1440,
@@ -83,6 +123,11 @@ RANGE_SIGNALS = {
     "regime_persistence_range",
     "range_continuation_bias",
 }
+
+
+def get_forecast_path(mode: str) -> Path:
+    suffix = get_mode_suffix(mode)
+    return FORECAST_DIR / f"regime_forecast{suffix}_latest.parquet"
 
 
 def classify_dashboard_bucket(row: pd.Series) -> str:
@@ -208,12 +253,14 @@ def build_dashboard_table(df: pd.DataFrame) -> pd.DataFrame:
     return dashboard
 
 
-def save_outputs(df: pd.DataFrame, name: str, timestamp: str) -> None:
-    csv_path = OUTPUT_ROOT / f"{name}_{timestamp}.csv"
-    parquet_path = OUTPUT_ROOT / f"{name}_{timestamp}.parquet"
+def save_outputs(df: pd.DataFrame, name: str, timestamp: str, mode: str) -> None:
+    suffix = get_mode_suffix(mode)
 
-    latest_csv = OUTPUT_ROOT / f"{name}_latest.csv"
-    latest_parquet = OUTPUT_ROOT / f"{name}_latest.parquet"
+    csv_path = OUTPUT_ROOT / f"{name}{suffix}_{timestamp}.csv"
+    parquet_path = OUTPUT_ROOT / f"{name}{suffix}_{timestamp}.parquet"
+
+    latest_csv = OUTPUT_ROOT / f"{name}{suffix}_latest.csv"
+    latest_parquet = OUTPUT_ROOT / f"{name}{suffix}_latest.parquet"
 
     df.to_csv(csv_path, index=False)
     df.to_parquet(parquet_path, index=False)
@@ -224,23 +271,33 @@ def save_outputs(df: pd.DataFrame, name: str, timestamp: str) -> None:
     logger.info(f"Saved {name}: {latest_csv}")
 
 
-def main() -> None:
+def main(mode: str = "full") -> None:
+    logger.info("=" * 80)
     logger.info("Starting latest regime dashboard table build")
-    logger.info(f"Forecast path: {FORECAST_PATH}")
+    logger.info(f"Mode: {mode}")
+    logger.info("=" * 80)
+
+    forecast_path = get_forecast_path(mode)
+
+    logger.info(f"Forecast path: {forecast_path}")
     logger.info(f"Output root: {OUTPUT_ROOT}")
 
-    if not FORECAST_PATH.exists():
-        raise FileNotFoundError(f"Missing forecast file: {FORECAST_PATH}")
+    if not forecast_path.exists():
+        raise FileNotFoundError(f"Missing forecast file: {forecast_path}")
 
-    forecast_df = pd.read_parquet(FORECAST_PATH)
+    forecast_df = pd.read_parquet(forecast_path)
 
     logger.info(f"Forecast rows loaded: {len(forecast_df)}")
+
+    if forecast_df.empty:
+        logger.warning("Forecast file is empty")
+        return
 
     dashboard = build_dashboard_table(forecast_df)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    save_outputs(dashboard, "latest_regime_dashboard", timestamp)
+    save_outputs(dashboard, "latest_regime_dashboard", timestamp, mode)
 
     watchlist = dashboard[
         dashboard["dashboard_bucket"].isin(
@@ -252,25 +309,28 @@ def main() -> None:
         )
     ].copy()
 
-    save_outputs(watchlist, "latest_regime_watchlist", timestamp)
+    save_outputs(watchlist, "latest_regime_watchlist", timestamp, mode)
 
     trend_table = dashboard[
         dashboard["dashboard_bucket"] == "persistent_trend"
     ].copy()
 
-    save_outputs(trend_table, "latest_persistent_trends", timestamp)
+    save_outputs(trend_table, "latest_persistent_trends", timestamp, mode)
 
     range_table = dashboard[
         dashboard["dashboard_bucket"] == "persistent_range"
     ].copy()
 
-    save_outputs(range_table, "latest_persistent_ranges", timestamp)
+    save_outputs(range_table, "latest_persistent_ranges", timestamp, mode)
 
+    logger.info("=" * 80)
     logger.info("Dashboard build completed successfully")
+    logger.info(f"Mode: {mode}")
     logger.info(f"Dashboard rows: {len(dashboard)}")
     logger.info(f"Watchlist rows: {len(watchlist)}")
     logger.info(f"Persistent trend rows: {len(trend_table)}")
     logger.info(f"Persistent range rows: {len(range_table)}")
+    logger.info("=" * 80)
 
     logger.info("Dashboard bucket counts:")
     logger.info(dashboard["dashboard_bucket"].value_counts().to_string())
@@ -297,4 +357,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(mode=args.mode)

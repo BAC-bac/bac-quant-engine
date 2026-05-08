@@ -11,12 +11,14 @@ Purpose:
 - Estimate likely next regime for each symbol/timeframe
 - Estimate persistence, transition, breakout and volatility risk
 - Save forecast reports
+- Support timeframe-group processing using --mode full/small/medium/large
 """
 
 from pathlib import Path
 from datetime import datetime
 import logging
 import sys
+import argparse
 
 import pandas as pd
 
@@ -24,8 +26,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 REGIME_ROOT = Path("E:/Quant_Lab/data/processed/regimes/classified/FTMO")
-TRANSITION_PATH = Path("E:/Quant_Lab/data/analysis/regime_transitions/FTMO/regime_transition_detail_latest.parquet")
-GLOBAL_TRANSITION_PATH = Path("E:/Quant_Lab/data/analysis/regime_transitions/FTMO/regime_transition_global_latest.parquet")
+TRANSITION_DIR = Path("E:/Quant_Lab/data/analysis/regime_transitions/FTMO")
 
 REPORT_ROOT = Path("E:/Quant_Lab/data/analysis/regime_forecasts/FTMO")
 LOG_DIR = PROJECT_ROOT / "logs" / "regimes"
@@ -33,6 +34,50 @@ LOG_DIR = PROJECT_ROOT / "logs" / "regimes"
 REPORT_ROOT.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+
+# ============================================================
+# TIMEFRAME GROUPS
+# ============================================================
+
+TIMEFRAME_GROUPS = {
+    "small": ["M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15"],
+    "medium": ["M20", "M30", "H1", "H2", "H3", "H4"],
+    "large": ["H6", "H8", "H12", "D1", "W1", "MN1"],
+    "full": None,
+}
+
+
+def get_allowed_timeframes(mode: str) -> set[str] | None:
+    allowed_timeframes = TIMEFRAME_GROUPS.get(mode)
+
+    if allowed_timeframes is None:
+        return None
+
+    return set(allowed_timeframes)
+
+
+def get_mode_suffix(mode: str) -> str:
+    return "" if mode == "full" else f"_{mode}"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run BACQE regime forecast engine by timeframe group."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["full", "small", "medium", "large"],
+        default="full",
+        help="Choose which timeframe group to forecast.",
+    )
+
+    return parser.parse_args()
+
+
+# ============================================================
+# LOGGING
+# ============================================================
 
 log_path = LOG_DIR / f"regime_forecast_engine_{datetime.now():%Y%m%d_%H%M%S}.log"
 
@@ -95,6 +140,15 @@ def extract_symbol_timeframe(path: Path) -> tuple[str, str]:
     suffix = f"_{timeframe}_regimes"
     symbol = path.stem.replace(suffix, "")
     return symbol, timeframe
+
+
+def get_transition_paths(mode: str) -> tuple[Path, Path]:
+    suffix = get_mode_suffix(mode)
+
+    transition_path = TRANSITION_DIR / f"regime_transition_detail{suffix}_latest.parquet"
+    global_transition_path = TRANSITION_DIR / f"regime_transition_global{suffix}_latest.parquet"
+
+    return transition_path, global_transition_path
 
 
 def get_latest_state(path: Path) -> dict | None:
@@ -183,8 +237,6 @@ def summarise_forecast(
     latest_state: dict,
     probs: pd.DataFrame,
 ) -> dict:
-    symbol = latest_state["symbol"]
-    timeframe = latest_state["timeframe"]
     current_regime = latest_state["current_regime"]
 
     if probs.empty:
@@ -302,23 +354,50 @@ def classify_forecast_signal(
     return "mixed_or_uncertain"
 
 
-def main() -> None:
+def main(mode: str = "full") -> None:
+    logger.info("=" * 80)
     logger.info("Starting regime forecast engine")
+    logger.info(f"Mode: {mode}")
+    logger.info("=" * 80)
 
-    if not TRANSITION_PATH.exists():
-        raise FileNotFoundError(f"Missing transition detail file: {TRANSITION_PATH}")
+    suffix = get_mode_suffix(mode)
+    allowed_timeframes = get_allowed_timeframes(mode)
 
-    if not GLOBAL_TRANSITION_PATH.exists():
-        raise FileNotFoundError(f"Missing global transition file: {GLOBAL_TRANSITION_PATH}")
+    transition_path, global_transition_path = get_transition_paths(mode)
 
-    transition_df = pd.read_parquet(TRANSITION_PATH)
-    global_transition_df = pd.read_parquet(GLOBAL_TRANSITION_PATH)
+    logger.info(f"Transition detail path: {transition_path}")
+    logger.info(f"Global transition path: {global_transition_path}")
+
+    if not transition_path.exists():
+        raise FileNotFoundError(f"Missing transition detail file: {transition_path}")
+
+    if not global_transition_path.exists():
+        raise FileNotFoundError(f"Missing global transition file: {global_transition_path}")
+
+    transition_df = pd.read_parquet(transition_path)
+    global_transition_df = pd.read_parquet(global_transition_path)
 
     regime_files = sorted(REGIME_ROOT.rglob("*_regimes.parquet"))
 
-    logger.info(f"Regime files discovered: {len(regime_files)}")
+    if allowed_timeframes is not None:
+        regime_files = [
+            path for path in regime_files
+            if path.parent.name in allowed_timeframes
+        ]
+
+    logger.info(f"Regime files discovered after mode filter: {len(regime_files)}")
+
+    if allowed_timeframes is not None:
+        logger.info(f"Allowed timeframes: {sorted(allowed_timeframes)}")
+    else:
+        logger.info("Allowed timeframes: all")
+
     logger.info(f"Transition rows loaded: {len(transition_df)}")
     logger.info(f"Global transition rows loaded: {len(global_transition_df)}")
+
+    if not regime_files:
+        logger.warning("No regime files found")
+        return
 
     forecasts = []
     failures = 0
@@ -349,13 +428,17 @@ def main() -> None:
 
     forecast_df = pd.DataFrame(forecasts)
 
+    if forecast_df.empty:
+        logger.warning("No forecasts created")
+        return
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    csv_path = REPORT_ROOT / f"regime_forecast_{timestamp}.csv"
-    parquet_path = REPORT_ROOT / f"regime_forecast_{timestamp}.parquet"
+    csv_path = REPORT_ROOT / f"regime_forecast{suffix}_{timestamp}.csv"
+    parquet_path = REPORT_ROOT / f"regime_forecast{suffix}_{timestamp}.parquet"
 
-    latest_csv = REPORT_ROOT / "regime_forecast_latest.csv"
-    latest_parquet = REPORT_ROOT / "regime_forecast_latest.parquet"
+    latest_csv = REPORT_ROOT / f"regime_forecast{suffix}_latest.csv"
+    latest_parquet = REPORT_ROOT / f"regime_forecast{suffix}_latest.parquet"
 
     forecast_df.to_csv(csv_path, index=False)
     forecast_df.to_parquet(parquet_path, index=False)
@@ -363,10 +446,13 @@ def main() -> None:
     forecast_df.to_csv(latest_csv, index=False)
     forecast_df.to_parquet(latest_parquet, index=False)
 
+    logger.info("=" * 80)
     logger.info("Regime forecast engine completed")
+    logger.info(f"Mode: {mode}")
     logger.info(f"Forecast rows: {len(forecast_df)}")
     logger.info(f"Failures: {failures}")
     logger.info(f"Saved latest forecast: {latest_csv}")
+    logger.info("=" * 80)
 
     logger.info("Forecast signal counts:")
     logger.info(forecast_df["forecast_signal"].value_counts().to_string())
@@ -403,4 +489,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(mode=args.mode)

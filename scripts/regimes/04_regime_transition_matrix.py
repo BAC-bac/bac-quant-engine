@@ -10,12 +10,14 @@ Purpose:
 - Calculate regime-to-regime transition counts and probabilities
 - Measure regime persistence
 - Save transition reports
+- Support timeframe-group processing using --mode full/small/medium/large
 """
 
 from pathlib import Path
 from datetime import datetime
 import logging
 import sys
+import argparse
 
 import pandas as pd
 
@@ -30,6 +32,46 @@ LOG_DIR = PROJECT_ROOT / "logs" / "regimes"
 REPORT_ROOT.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+
+# ============================================================
+# TIMEFRAME GROUPS
+# ============================================================
+
+TIMEFRAME_GROUPS = {
+    "small": ["M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15"],
+    "medium": ["M20", "M30", "H1", "H2", "H3", "H4"],
+    "large": ["H6", "H8", "H12", "D1", "W1", "MN1"],
+    "full": None,
+}
+
+
+def get_allowed_timeframes(mode: str) -> set[str] | None:
+    allowed_timeframes = TIMEFRAME_GROUPS.get(mode)
+
+    if allowed_timeframes is None:
+        return None
+
+    return set(allowed_timeframes)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build BACQE regime transition matrices by timeframe group."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["full", "small", "medium", "large"],
+        default="full",
+        help="Choose which timeframe group to analyse.",
+    )
+
+    return parser.parse_args()
+
+
+# ============================================================
+# LOGGING
+# ============================================================
 
 log_path = LOG_DIR / f"regime_transitions_{datetime.now():%Y%m%d_%H%M%S}.log"
 
@@ -152,14 +194,34 @@ def analyse_transitions(path: Path) -> tuple[pd.DataFrame, dict] | tuple[None, N
     return counts, summary
 
 
-def main() -> None:
+def main(mode: str = "full") -> None:
+    logger.info("=" * 80)
     logger.info("Starting regime transition analysis")
+    logger.info(f"Mode: {mode}")
     logger.info(f"Regime root: {REGIME_ROOT}")
     logger.info(f"Report root: {REPORT_ROOT}")
+    logger.info("=" * 80)
+
+    allowed_timeframes = get_allowed_timeframes(mode)
 
     files = sorted(REGIME_ROOT.rglob("*_regimes.parquet"))
 
-    logger.info(f"Discovered {len(files)} classified regime files")
+    if allowed_timeframes is not None:
+        files = [
+            path for path in files
+            if path.parent.name in allowed_timeframes
+        ]
+
+    logger.info(f"Discovered {len(files)} classified regime files after mode filter")
+
+    if allowed_timeframes is not None:
+        logger.info(f"Allowed timeframes: {sorted(allowed_timeframes)}")
+    else:
+        logger.info("Allowed timeframes: all")
+
+    if not files:
+        logger.warning("No classified regime files found")
+        return
 
     all_transitions = []
     summaries = []
@@ -210,6 +272,7 @@ def main() -> None:
     )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suffix = "" if mode == "full" else f"_{mode}"
 
     reports = {
         "regime_transition_detail": transition_df,
@@ -218,11 +281,11 @@ def main() -> None:
     }
 
     for name, df in reports.items():
-        csv_path = REPORT_ROOT / f"{name}_{timestamp}.csv"
-        parquet_path = REPORT_ROOT / f"{name}_{timestamp}.parquet"
+        csv_path = REPORT_ROOT / f"{name}{suffix}_{timestamp}.csv"
+        parquet_path = REPORT_ROOT / f"{name}{suffix}_{timestamp}.parquet"
 
-        latest_csv = REPORT_ROOT / f"{name}_latest.csv"
-        latest_parquet = REPORT_ROOT / f"{name}_latest.parquet"
+        latest_csv = REPORT_ROOT / f"{name}{suffix}_latest.csv"
+        latest_parquet = REPORT_ROOT / f"{name}{suffix}_latest.parquet"
 
         df.to_csv(csv_path, index=False)
         df.to_parquet(parquet_path, index=False)
@@ -232,10 +295,13 @@ def main() -> None:
 
         logger.info(f"Saved {name}: {latest_csv}")
 
+    logger.info("=" * 80)
     logger.info("Regime transition analysis completed")
+    logger.info(f"Mode: {mode}")
     logger.info(f"Transition rows: {len(transition_df)}")
     logger.info(f"Summary rows: {len(summary_df)}")
     logger.info(f"Failures: {failures}")
+    logger.info("=" * 80)
 
     logger.info("Global transition probabilities:")
     logger.info(
@@ -264,4 +330,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(mode=args.mode)
