@@ -10,6 +10,7 @@ Purpose:
 - Download OHLCV bars for selected symbols and timeframes
 - Save files as Parquet into the Quant Lab data lake
 - Support full first download and incremental updates
+- Support timeframe-group updates using --mode full/small/medium/large
 """
 
 from pathlib import Path
@@ -17,10 +18,61 @@ from datetime import datetime, timezone
 import logging
 import sys
 import time
+import argparse
 
 import MetaTrader5 as mt5
 import pandas as pd
 import yaml
+
+
+# ============================================================
+# TIMEFRAME GROUPS
+# ============================================================
+
+TIMEFRAME_GROUPS = {
+    "small": [
+        "M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15"
+    ],
+    "medium": [
+        "M20", "M30", "H1", "H2", "H3", "H4"
+    ],
+    "large": [
+        "H6", "H8", "H12", "D1", "W1", "MN1"
+    ],
+    "full": None,
+}
+
+
+def get_allowed_timeframes(mode: str) -> set[str] | None:
+    """
+    Return the allowed timeframe group for the selected mode.
+
+    full   -> all timeframes
+    small  -> M1 to M15
+    medium -> M20 to H4
+    large  -> H6 to MN1
+    """
+    allowed_timeframes = TIMEFRAME_GROUPS.get(mode)
+
+    if allowed_timeframes is None:
+        return None
+
+    return set(allowed_timeframes)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Download BACQE market data by timeframe group."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["full", "small", "medium", "large"],
+        default="full",
+        help="Choose which timeframe group to update.",
+    )
+
+    return parser.parse_args()
 
 
 # ============================================================
@@ -191,17 +243,29 @@ def normalise_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 # MAIN DOWNLOAD LOOP
 # ============================================================
 
-def main() -> None:
+def main(mode: str = "full") -> None:
+    logger.info("=" * 80)
     logger.info("Starting BACQE Regime Engine market data download")
+    logger.info(f"Mode: {mode}")
+    logger.info("=" * 80)
+
     logger.info(f"Project root: {PROJECT_ROOT}")
     logger.info(f"Config path: {CONFIG_PATH}")
     logger.info(f"Output root: {DATA_ROOT}")
     logger.info(f"Log folder: {LOG_DIR}")
 
+    allowed_timeframes = get_allowed_timeframes(mode)
+
     symbols, timeframes = load_market_universe(CONFIG_PATH)
 
+    if allowed_timeframes is not None:
+        timeframes = [
+            tf for tf in timeframes
+            if tf in allowed_timeframes
+        ]
+
     logger.info(f"Loaded {len(symbols)} symbols")
-    logger.info(f"Loaded {len(timeframes)} timeframes")
+    logger.info(f"Loaded {len(timeframes)} timeframes after mode filter")
     logger.info(f"Symbols: {symbols}")
     logger.info(f"Timeframes: {timeframes}")
 
@@ -284,8 +348,11 @@ def main() -> None:
         mt5.shutdown()
         logger.info("MT5 connection closed")
 
+    logger.info("=" * 80)
     logger.info(f"Completed market data download. Files updated: {total_saved}")
+    logger.info("=" * 80)
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(mode=args.mode)

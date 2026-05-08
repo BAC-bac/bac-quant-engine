@@ -15,6 +15,7 @@ from pathlib import Path
 from datetime import datetime
 import logging
 import sys
+import argparse
 
 import numpy as np
 import pandas as pd
@@ -35,6 +36,37 @@ LOG_DIR = PROJECT_ROOT / "logs" / "regimes"
 FEATURE_ROOT.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+
+TIMEFRAME_GROUPS = {
+    "small": ["M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15"],
+    "medium": ["M20", "M30", "H1", "H2", "H3", "H4"],
+    "large": ["H6", "H8", "H12", "D1", "W1", "MN1"],
+    "full": None,
+}
+
+
+def get_allowed_timeframes(mode: str) -> set[str] | None:
+    allowed_timeframes = TIMEFRAME_GROUPS.get(mode)
+
+    if allowed_timeframes is None:
+        return None
+
+    return set(allowed_timeframes)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build BACQE regime features by timeframe group."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["full", "small", "medium", "large"],
+        default="full",
+        help="Choose which timeframe group to process.",
+    )
+
+    return parser.parse_args()
 
 # ============================================================
 # LOGGING
@@ -206,11 +238,32 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 # FILE PROCESSING
 # ============================================================
 
-def get_indicator_ready_files() -> pd.DataFrame:
-    if not AUDIT_PATH.exists():
-        raise FileNotFoundError(f"Missing audit file: {AUDIT_PATH}")
+def get_indicator_ready_files(mode: str = "full") -> pd.DataFrame:
+    if mode == "full":
+        audit_path = AUDIT_PATH
+    else:
+        audit_path = AUDIT_PATH.parent / f"market_data_audit_{mode}_latest.parquet"
 
-    audit_df = pd.read_parquet(AUDIT_PATH)
+        if not audit_path.exists():
+            logger.warning(
+                f"Mode-specific audit file not found: {audit_path}. "
+                f"Falling back to full latest audit file: {AUDIT_PATH}"
+            )
+            audit_path = AUDIT_PATH
+
+    if not audit_path.exists():
+        raise FileNotFoundError(f"Missing audit file: {audit_path}")
+
+    logger.info(f"Using audit file: {audit_path}")
+
+    audit_df = pd.read_parquet(audit_path)
+
+    allowed_timeframes = get_allowed_timeframes(mode)
+
+    if allowed_timeframes is not None:
+        audit_df = audit_df[
+            audit_df["timeframe"].isin(allowed_timeframes)
+        ].copy()
 
     ready_df = audit_df[
         (audit_df["indicator_ready"] == True) &
@@ -250,15 +303,30 @@ def process_file(symbol: str, timeframe: str) -> bool:
 # MAIN
 # ============================================================
 
-def main() -> None:
-    logger.info("Starting regime feature build")
+def main(mode: str = "full") -> None:
+    logger.info("=" * 80)
+    logger.info("Starting BACQE regime feature build")
+    logger.info(f"Mode: {mode}")
+    logger.info("=" * 80)
+
+    allowed_timeframes = get_allowed_timeframes(mode)
+
     logger.info(f"Data root: {DATA_ROOT}")
     logger.info(f"Audit path: {AUDIT_PATH}")
     logger.info(f"Feature root: {FEATURE_ROOT}")
 
-    ready_df = get_indicator_ready_files()
+    if allowed_timeframes is not None:
+        logger.info(f"Allowed timeframes: {sorted(allowed_timeframes)}")
+    else:
+        logger.info("Allowed timeframes: all")
 
-    logger.info(f"Indicator-ready files to process: {len(ready_df)}")
+    ready_df = get_indicator_ready_files(mode=mode)
+
+    logger.info(f"Indicator-ready files to process after mode filter: {len(ready_df)}")
+
+    if ready_df.empty:
+        logger.warning("No indicator-ready files found for this mode")
+        return
 
     success_count = 0
     fail_count = 0
@@ -280,10 +348,14 @@ def main() -> None:
             logger.error(f"{symbol} {timeframe}: failed with error: {exc}")
             fail_count += 1
 
+    logger.info("=" * 80)
     logger.info("Regime feature build completed")
+    logger.info(f"Mode: {mode}")
     logger.info(f"Successful files: {success_count}")
     logger.info(f"Failed files: {fail_count}")
+    logger.info("=" * 80)
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(mode=args.mode)

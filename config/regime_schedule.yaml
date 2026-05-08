@@ -1,0 +1,53 @@
+regime_schedule:
+  small_timeframes:
+    enabled: true
+    timeframes:
+      - M1
+      - M2
+      - M3
+      - M4
+      - M5
+      - M6
+      - M10
+      - M12
+      - M15
+    update_frequency: intraday
+
+  medium_timeframes:
+    enabled: true
+    timeframes:
+      - M20
+      - M30
+      - H1
+      - H2
+      - H3
+      - H4
+    update_frequency: hourly
+
+  large_timeframes:
+    enabled: true
+    timeframes:
+      - H6
+      - H8
+      - H12
+      - D1
+      - W1
+      - MN1
+    update_frequency: daily
+
+pipeline_modes:
+  full:
+    description: Run complete regime pipeline across all symbols and timeframes
+
+  incremental_small:
+    description: Update only small intraday timeframes
+
+  incremental_medium:
+    description: Update medium timeframes
+
+  incremental_large:
+    description: Update higher timeframes
+
+logging:
+  log_dir: logs/regimes
+  keep_last_n_logs: 30

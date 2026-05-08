@@ -173,7 +173,7 @@ def build_universe(df: pd.DataFrame) -> dict:
     return universe
 
 
-def main() -> None:
+def main(mode: str = "full"):
     logger.info("Starting market universe build from MT5 discovery file")
     logger.info(f"Source CSV: {SOURCE_CSV}")
     logger.info(f"Output YAML: {OUTPUT_YAML}")

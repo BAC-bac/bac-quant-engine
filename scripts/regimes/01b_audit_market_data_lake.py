@@ -10,14 +10,66 @@ Purpose:
 - Analyse data coverage and quality
 - Produce audit reports
 - Detect weak/sparse datasets before indicators/regimes
+- Support timeframe-group updates using --mode full/small/medium/large
 """
 
 from pathlib import Path
 from datetime import datetime, timezone
 import logging
 import sys
+import argparse
 
 import pandas as pd
+
+
+# ============================================================
+# TIMEFRAME GROUPS
+# ============================================================
+
+TIMEFRAME_GROUPS = {
+    "small": [
+        "M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15"
+    ],
+    "medium": [
+        "M20", "M30", "H1", "H2", "H3", "H4"
+    ],
+    "large": [
+        "H6", "H8", "H12", "D1", "W1", "MN1"
+    ],
+    "full": None,
+}
+
+
+def get_allowed_timeframes(mode: str) -> set[str] | None:
+    """
+    Return the allowed timeframe group for the selected mode.
+
+    full   -> all timeframes
+    small  -> M1 to M15
+    medium -> M20 to H4
+    large  -> H6 to MN1
+    """
+    allowed_timeframes = TIMEFRAME_GROUPS.get(mode)
+
+    if allowed_timeframes is None:
+        return None
+
+    return set(allowed_timeframes)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Download BACQE market data by timeframe group."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["full", "small", "medium", "large"],
+        default="full",
+        help="Choose which timeframe group to update.",
+    )
+
+    return parser.parse_args()
 
 
 # ============================================================
@@ -130,13 +182,29 @@ def audit_parquet_file(parquet_path: Path) -> dict:
 # MAIN
 # ============================================================
 
-def main() -> None:
+def main(mode: str = "full") -> None:
+    logger.info("=" * 80)
     logger.info("Starting market data lake audit")
+    logger.info(f"Mode: {mode}")
     logger.info(f"Scanning root: {DATA_ROOT}")
+    logger.info("=" * 80)
+
+    allowed_timeframes = get_allowed_timeframes(mode)
 
     parquet_files = sorted(DATA_ROOT.rglob("*.parquet"))
 
-    logger.info(f"Discovered {len(parquet_files)} parquet files")
+    if allowed_timeframes is not None:
+        parquet_files = [
+            path for path in parquet_files
+            if path.parent.name in allowed_timeframes
+        ]
+
+    logger.info(f"Discovered {len(parquet_files)} parquet files after mode filter")
+
+    if allowed_timeframes is not None:
+        logger.info(f"Allowed timeframes: {sorted(allowed_timeframes)}")
+    else:
+        logger.info("Allowed timeframes: all")
 
     if not parquet_files:
         logger.warning("No parquet files found")
@@ -159,11 +227,11 @@ def main() -> None:
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    csv_path = REPORT_DIR / f"market_data_audit_{timestamp}.csv"
-    parquet_path = REPORT_DIR / f"market_data_audit_{timestamp}.parquet"
+    csv_path = REPORT_DIR / f"market_data_audit_{mode}_{timestamp}.csv"
+    parquet_path = REPORT_DIR / f"market_data_audit_{mode}_{timestamp}.parquet"
 
-    latest_csv = REPORT_DIR / "market_data_audit_latest.csv"
-    latest_parquet = REPORT_DIR / "market_data_audit_latest.parquet"
+    latest_csv = REPORT_DIR / f"market_data_audit_{mode}_latest.csv"
+    latest_parquet = REPORT_DIR / f"market_data_audit_{mode}_latest.parquet"
 
     audit_df.to_csv(csv_path, index=False)
     audit_df.to_csv(latest_csv, index=False)
@@ -176,7 +244,6 @@ def main() -> None:
     logger.info(f"Saved Parquet report: {parquet_path}")
 
     logger.info("Summary:")
-
     logger.info(f"Total files: {len(audit_df)}")
 
     logger.info(
@@ -208,4 +275,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(mode=args.mode)
