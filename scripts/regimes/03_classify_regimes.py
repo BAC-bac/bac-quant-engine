@@ -17,6 +17,7 @@ from pathlib import Path
 from datetime import datetime
 import logging
 import sys
+import argparse
 
 import numpy as np
 import pandas as pd
@@ -35,6 +36,42 @@ LOG_DIR = PROJECT_ROOT / "logs" / "regimes"
 
 REGIME_ROOT.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ============================================================
+# TIMEFRAME MODE SUPPORT
+# ============================================================
+
+TIMEFRAME_GROUPS = {
+    "small": ["M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15"],
+    "medium": ["M20", "M30", "H1", "H2", "H3", "H4"],
+    "large": ["H6", "H8", "H12", "D1", "W1", "MN1"],
+    "full": None,
+}
+
+
+def get_allowed_timeframes(mode: str) -> set[str] | None:
+    allowed_timeframes = TIMEFRAME_GROUPS.get(mode)
+
+    if allowed_timeframes is None:
+        return None
+
+    return set(allowed_timeframes)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Classify BACQE regimes by timeframe group."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["full", "small", "medium", "large"],
+        default="full",
+        help="Choose which timeframe group to classify.",
+    )
+
+    return parser.parse_args()
 
 
 # ============================================================
@@ -286,10 +323,8 @@ def process_file(feature_path: Path) -> bool:
 
     output_path = output_dir / f"{symbol}_{timeframe}_regimes.parquet"
 
-    if output_path.exists():
-        logger.info(f"{symbol} {timeframe}: already classified, skipping")
-        return True
-
+    # Always overwrite classification output so incremental feature updates
+    # are reflected in the regime layer.
     df = pd.read_parquet(feature_path)
 
     classified = classify_regimes(df)

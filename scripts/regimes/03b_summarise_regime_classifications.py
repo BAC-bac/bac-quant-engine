@@ -16,6 +16,7 @@ from pathlib import Path
 from datetime import datetime
 import logging
 import sys
+import argparse
 
 import pandas as pd
 
@@ -43,6 +44,40 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+
+
+
+TIMEFRAME_GROUPS = {
+    "small": ["M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15"],
+    "medium": ["M20", "M30", "H1", "H2", "H3", "H4"],
+    "large": ["H6", "H8", "H12", "D1", "W1", "MN1"],
+    "full": None,
+}
+
+
+def get_allowed_timeframes(mode: str) -> set[str] | None:
+    allowed_timeframes = TIMEFRAME_GROUPS.get(mode)
+
+    if allowed_timeframes is None:
+        return None
+
+    return set(allowed_timeframes)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Summarise BACQE regime classifications by timeframe group."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["full", "small", "medium", "large"],
+        default="full",
+        help="Choose which timeframe group to summarise.",
+    )
+
+    return parser.parse_args()
 
 
 MIN_ROWS = 100
@@ -156,14 +191,30 @@ def build_detailed_distribution(files: list[Path]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main() -> None:
+def main(mode: str = "full") -> None:
+    logger.info("=" * 80)
     logger.info("Starting regime summary build")
+    logger.info(f"Mode: {mode}")
     logger.info(f"Regime root: {REGIME_ROOT}")
     logger.info(f"Report root: {REPORT_ROOT}")
+    logger.info("=" * 80)
 
     files = sorted(REGIME_ROOT.rglob("*_regimes.parquet"))
 
-    logger.info(f"Discovered {len(files)} classified regime files")
+    allowed_timeframes = get_allowed_timeframes(mode)
+
+    if allowed_timeframes is not None:
+        files = [
+            path for path in files
+            if path.parent.name in allowed_timeframes
+        ]
+
+    logger.info(f"Discovered {len(files)} classified regime files after mode filter")
+
+    if allowed_timeframes is not None:
+        logger.info(f"Allowed timeframes: {sorted(allowed_timeframes)}")
+    else:
+        logger.info("Allowed timeframes: all")
 
     if not files:
         logger.warning("No classified regime files found")
@@ -200,15 +251,17 @@ def main() -> None:
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    summary_csv = REPORT_ROOT / f"regime_summary_{timestamp}.csv"
-    summary_parquet = REPORT_ROOT / f"regime_summary_{timestamp}.parquet"
-    latest_summary_csv = REPORT_ROOT / "regime_summary_latest.csv"
-    latest_summary_parquet = REPORT_ROOT / "regime_summary_latest.parquet"
+    suffix = "" if mode == "full" else f"_{mode}"
 
-    distribution_csv = REPORT_ROOT / f"regime_distribution_{timestamp}.csv"
-    distribution_parquet = REPORT_ROOT / f"regime_distribution_{timestamp}.parquet"
-    latest_distribution_csv = REPORT_ROOT / "regime_distribution_latest.csv"
-    latest_distribution_parquet = REPORT_ROOT / "regime_distribution_latest.parquet"
+    summary_csv = REPORT_ROOT / f"regime_summary{suffix}_{timestamp}.csv"
+    summary_parquet = REPORT_ROOT / f"regime_summary{suffix}_{timestamp}.parquet"
+    latest_summary_csv = REPORT_ROOT / f"regime_summary{suffix}_latest.csv"
+    latest_summary_parquet = REPORT_ROOT / f"regime_summary{suffix}_latest.parquet"
+
+    distribution_csv = REPORT_ROOT / f"regime_distribution{suffix}_{timestamp}.csv"
+    distribution_parquet = REPORT_ROOT / f"regime_distribution{suffix}_{timestamp}.parquet"
+    latest_distribution_csv = REPORT_ROOT / f"regime_distribution{suffix}_latest.csv"
+    latest_distribution_parquet = REPORT_ROOT / f"regime_distribution{suffix}_latest.parquet"
 
     summary_df.to_csv(summary_csv, index=False)
     summary_df.to_parquet(summary_parquet, index=False)
@@ -254,4 +307,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(mode=args.mode)

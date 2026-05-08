@@ -17,6 +17,7 @@ from pathlib import Path
 from datetime import datetime
 import logging
 import sys
+import argparse
 
 import pandas as pd
 
@@ -47,12 +48,63 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def save_report(df: pd.DataFrame, name: str, timestamp: str) -> None:
-    csv_path = REPORT_ROOT / f"{name}_{timestamp}.csv"
-    parquet_path = REPORT_ROOT / f"{name}_{timestamp}.parquet"
+TIMEFRAME_GROUPS = {
+    "small": ["M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15"],
+    "medium": ["M20", "M30", "H1", "H2", "H3", "H4"],
+    "large": ["H6", "H8", "H12", "D1", "W1", "MN1"],
+    "full": None,
+}
 
-    latest_csv = REPORT_ROOT / f"{name}_latest.csv"
-    latest_parquet = REPORT_ROOT / f"{name}_latest.parquet"
+
+def get_allowed_timeframes(mode: str) -> set[str] | None:
+    allowed_timeframes = TIMEFRAME_GROUPS.get(mode)
+
+    if allowed_timeframes is None:
+        return None
+
+    return set(allowed_timeframes)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Analyse BACQE regime summaries by timeframe group."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["full", "small", "medium", "large"],
+        default="full",
+        help="Choose which timeframe group to analyse.",
+    )
+
+    return parser.parse_args()
+
+
+def get_summary_paths(mode: str) -> tuple[Path, Path]:
+    if mode == "full":
+        return SUMMARY_PATH, DISTRIBUTION_PATH
+
+    summary_path = SUMMARY_PATH.parent / f"regime_summary_{mode}_latest.parquet"
+    distribution_path = DISTRIBUTION_PATH.parent / f"regime_distribution_{mode}_latest.parquet"
+
+    if not summary_path.exists() or not distribution_path.exists():
+        logger.warning(
+            f"Mode-specific summary files not found for mode={mode}. "
+            "Falling back to full latest summary files."
+        )
+        return SUMMARY_PATH, DISTRIBUTION_PATH
+
+    return summary_path, distribution_path
+
+
+def save_report(df: pd.DataFrame, name: str, timestamp: str, mode: str = "full") -> None:
+    suffix = "" if mode == "full" else f"_{mode}"
+
+    csv_path = REPORT_ROOT / f"{name}{suffix}_{timestamp}.csv"
+    parquet_path = REPORT_ROOT / f"{name}{suffix}_{timestamp}.parquet"
+
+    latest_csv = REPORT_ROOT / f"{name}{suffix}_latest.csv"
+    latest_parquet = REPORT_ROOT / f"{name}{suffix}_latest.parquet"
 
     df.to_csv(csv_path, index=False)
     df.to_parquet(parquet_path, index=False)
@@ -63,14 +115,38 @@ def save_report(df: pd.DataFrame, name: str, timestamp: str) -> None:
     logger.info(f"Saved {name}: {latest_csv}")
 
 
-def main() -> None:
+def main(mode: str = "full") -> None:
+    logger.info("=" * 80)
     logger.info("Starting regime summary diagnostics")
+    logger.info(f"Mode: {mode}")
+    logger.info("=" * 80)
 
-    summary_df = pd.read_parquet(SUMMARY_PATH)
-    distribution_df = pd.read_parquet(DISTRIBUTION_PATH)
+    summary_path, distribution_path = get_summary_paths(mode)
 
-    logger.info(f"Summary rows: {len(summary_df)}")
-    logger.info(f"Distribution rows: {len(distribution_df)}")
+    if not summary_path.exists():
+        raise FileNotFoundError(f"Missing summary file: {summary_path}")
+
+    if not distribution_path.exists():
+        raise FileNotFoundError(f"Missing distribution file: {distribution_path}")
+
+    logger.info(f"Summary path: {summary_path}")
+    logger.info(f"Distribution path: {distribution_path}")
+
+    summary_df = pd.read_parquet(summary_path)
+    distribution_df = pd.read_parquet(distribution_path)
+
+    allowed_timeframes = get_allowed_timeframes(mode)
+
+    if allowed_timeframes is not None:
+        summary_df = summary_df[summary_df["timeframe"].isin(allowed_timeframes)].copy()
+        distribution_df = distribution_df[distribution_df["timeframe"].isin(allowed_timeframes)].copy()
+
+    logger.info(f"Summary rows after mode filter: {len(summary_df)}")
+    logger.info(f"Distribution rows after mode filter: {len(distribution_df)}")
+
+    if summary_df.empty or distribution_df.empty:
+        logger.warning("No summary/distribution rows available for this mode")
+        return
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -85,7 +161,7 @@ def main() -> None:
         2,
     )
 
-    save_report(dominant_counts, "dominant_regime_counts", timestamp)
+    save_report(dominant_counts, "dominant_regime_counts", timestamp, mode=mode)
 
     timeframe_balance = (
         summary_df.groupby("timeframe")
@@ -104,7 +180,7 @@ def main() -> None:
         .reset_index()
     )
 
-    save_report(timeframe_balance, "timeframe_regime_balance", timestamp)
+    save_report(timeframe_balance, "timeframe_regime_balance", timestamp, mode=mode)
 
     most_bullish = summary_df.sort_values("bull_trend_pct", ascending=False).head(50)
     most_bearish = summary_df.sort_values("bear_trend_pct", ascending=False).head(50)
@@ -114,13 +190,13 @@ def main() -> None:
     weakest_trend = summary_df.sort_values("weak_trend_pct", ascending=False).head(50)
     highest_confidence = summary_df.sort_values("avg_regime_confidence", ascending=False).head(50)
 
-    save_report(most_bullish, "top_most_bullish", timestamp)
-    save_report(most_bearish, "top_most_bearish", timestamp)
-    save_report(most_ranging, "top_most_ranging", timestamp)
-    save_report(most_volatile, "top_most_volatile", timestamp)
-    save_report(strongest_trend, "top_strongest_trend", timestamp)
-    save_report(weakest_trend, "top_weakest_trend", timestamp)
-    save_report(highest_confidence, "top_highest_confidence", timestamp)
+    save_report(most_bullish, "top_most_bullish", timestamp, mode=mode)
+    save_report(most_bearish, "top_most_bearish", timestamp, mode=mode)
+    save_report(most_ranging, "top_most_ranging", timestamp, mode=mode)
+    save_report(most_volatile, "top_most_volatile", timestamp, mode=mode)
+    save_report(strongest_trend, "top_strongest_trend", timestamp, mode=mode)
+    save_report(weakest_trend, "top_weakest_trend", timestamp, mode=mode)
+    save_report(highest_confidence, "top_highest_confidence", timestamp, mode=mode)
 
     regime_global_distribution = (
         distribution_df.groupby("composite_regime")
@@ -134,7 +210,7 @@ def main() -> None:
         .sort_values("total_count", ascending=False)
     )
 
-    save_report(regime_global_distribution, "global_composite_regime_distribution", timestamp)
+    save_report(regime_global_distribution, "global_composite_regime_distribution", timestamp, mode=mode)
 
     logger.info("Diagnostics completed successfully")
 
@@ -171,4 +247,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(mode=args.mode)
