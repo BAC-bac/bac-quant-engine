@@ -182,8 +182,14 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     close = df["close"]
 
     # Returns
+    # Returns
     df["return_1"] = close.pct_change()
-    df["log_return_1"] = np.log(close / close.shift(1))
+
+    price_ratio = close / close.shift(1)
+    price_ratio = price_ratio.replace([np.inf, -np.inf], np.nan)
+    price_ratio = price_ratio.where(price_ratio > 0)
+
+    df["log_return_1"] = np.log(price_ratio)
 
     # Rolling volatility
     df["rolling_vol_20"] = df["log_return_1"].rolling(VOL_WINDOW).std()
