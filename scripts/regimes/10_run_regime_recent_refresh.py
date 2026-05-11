@@ -18,7 +18,7 @@ It is a fast operational refresh layer.
 """
 
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import argparse
 import logging
 import sys
@@ -130,6 +130,27 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
+def market_is_open_utc() -> bool:
+    """
+    FX market-hours guard using UTC.
+
+    Open:
+    - Sunday from 22:00 UTC
+    - Monday to Thursday all day
+    - Friday until 22:00 UTC
+    """
+
+    now = datetime.now(timezone.utc)
+
+    weekday = now.weekday()  # Monday=0, Sunday=6
+    hour = now.hour
+
+    return (
+        (weekday == 6 and hour >= 22) or
+        (weekday in [0, 1, 2, 3]) or
+        (weekday == 4 and hour < 22)
+    )
 
 def get_mode_suffix(mode: str) -> str:
     return "" if mode == "full" else f"_{mode}"
@@ -813,6 +834,10 @@ def main(mode: str, lookback_bars: int, symbols: list[str] | None) -> None:
     logger.info(f"Lookback bars: {lookback_bars}")
     logger.info(f"Symbols: {symbols if symbols else 'all'}")
     logger.info("=" * 80)
+
+    if not market_is_open_utc():
+        logger.info("Market is closed according to UTC FX session guard. Skipping refresh.")
+        return
 
     allowed_timeframes = get_allowed_timeframes(mode)
     suffix = get_mode_suffix(mode)
