@@ -238,6 +238,10 @@ def resolve_controls(dashboard: pd.DataFrame, family_lookup: pd.DataFrame) -> pd
 
     if "timeframe_group" not in df.columns:
         df["timeframe_group"] = df["timeframe"].apply(classify_timeframe_group)
+    else:
+        df["timeframe_group"] = df["timeframe_group"].fillna("")
+        df.loc[df["timeframe_group"].astype(str).str.strip().eq(""), "timeframe_group"] = (
+            df.loc[df["timeframe_group"].astype(str).str.strip().eq(""), "timeframe"].apply(classify_timeframe_group))
 
     if "regime_family" not in df.columns:
         df["regime_family"] = df["current_regime"].apply(regime_family)
