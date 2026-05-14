@@ -1,0 +1,20 @@
+project:
+  name: BACQE Tick Data Lake
+  phase: raw_tick_capture
+
+broker: FTMO
+
+symbols:
+  - GBPUSD
+
+paths:
+  output_root: "E:/Quant_Lab/data/raw/ticks/mt5"
+  log_dir: "logs/tick_data"
+
+capture:
+  lookback_seconds: 300
+  tick_type: all
+
+storage:
+  format: parquet
+  compression: snappy
