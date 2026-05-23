@@ -6,6 +6,11 @@ broker: FTMO
 
 symbols:
   - GBPUSD
+  - EURUSD
+  - USDJPY
+  - EURGBP
+  - GBPJPY
+  - XAUUSD
 
 paths:
   output_root: "E:/Quant_Lab/data/raw/ticks/mt5"
