@@ -59,6 +59,26 @@ TICK_WINNERS_PATH = (
     / "symbol_winners_bar_efficiency_latest.csv"
 )
 
+VOL_CLUSTERING_MASTER_PATH = (
+    DATA_LAKE_ROOT
+    / "data"
+    / "analysis"
+    / "tick_research"
+    / "volatility_clustering"
+    / "_master"
+    / "master_volatility_clustering_analysis_latest.csv"
+)
+
+VOL_CLUSTERING_WINNERS_PATH = (
+    DATA_LAKE_ROOT
+    / "data"
+    / "analysis"
+    / "tick_research"
+    / "volatility_clustering"
+    / "_master"
+    / "symbol_winners_volatility_clustering_latest.csv"
+)
+
 TICK_CHART_ROOT = (
     DATA_LAKE_ROOT
     / "reports"
@@ -117,6 +137,8 @@ tick_comparison = read_csv(TICK_COMPARISON_PATH)
 tick_efficiency = read_csv(TICK_EFFICIENCY_MASTER_PATH)
 tick_winners = read_csv(TICK_WINNERS_PATH)
 
+vol_clustering = read_csv(VOL_CLUSTERING_MASTER_PATH)
+vol_winners = read_csv(VOL_CLUSTERING_WINNERS_PATH)
 
 st.title("BACQE Adaptive Operator Terminal")
 
@@ -243,6 +265,44 @@ with tab_tick_research:
                 st.bar_chart(
                     tick_winners.set_index("symbol")["structural_efficiency_score"]
                 )
+                
+                st.divider()
+
+        st.subheader("Volatility Clustering Winners")
+
+        if vol_winners.empty:
+            st.warning("Volatility clustering winner summary not found.")
+        else:
+            vol_cols = [
+                "symbol",
+                "bar_type",
+                "bar_family",
+                "bar_count",
+                "return_std",
+                "abs_return_autocorr_lag1",
+                "squared_return_autocorr_lag1",
+                "rolling_vol_25_autocorr_lag1",
+                "rolling_abs_25_autocorr_lag1",
+                "volatility_clustering_score",
+            ]
+
+            available_vol_cols = [
+                col for col in vol_cols if col in vol_winners.columns
+            ]
+
+            st.dataframe(
+                vol_winners[available_vol_cols],
+                use_container_width=True,
+            )
+
+            if {
+                "symbol",
+                "volatility_clustering_score",
+            }.issubset(vol_winners.columns):
+                st.caption("Strongest volatility clustering score by symbol")
+                st.bar_chart(
+                    vol_winners.set_index("symbol")["volatility_clustering_score"]
+                )
 
         st.divider()
 
@@ -343,6 +403,38 @@ with tab_tick_research:
                 st.caption("Top 15 structural efficiency scores")
                 st.bar_chart(
                     top_efficiency.set_index("label")["structural_efficiency_score"]
+                )
+                
+                st.divider()
+
+        st.subheader("Master Volatility Clustering Ranking")
+
+        if vol_clustering.empty:
+            st.warning("Master volatility clustering analysis not found.")
+        else:
+            st.dataframe(vol_clustering, use_container_width=True)
+
+            if {
+                "symbol",
+                "bar_type",
+                "volatility_clustering_score",
+            }.issubset(vol_clustering.columns):
+                top_vol = (
+                    vol_clustering
+                    .sort_values("volatility_clustering_score", ascending=False)
+                    .head(15)
+                    .copy()
+                )
+
+                top_vol["label"] = (
+                    top_vol["symbol"].astype(str)
+                    + " | "
+                    + top_vol["bar_type"].astype(str)
+                )
+
+                st.caption("Top 15 volatility clustering scores")
+                st.bar_chart(
+                    top_vol.set_index("label")["volatility_clustering_score"]
                 )
 
         st.divider()
