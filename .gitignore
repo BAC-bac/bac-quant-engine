@@ -18,3 +18,11 @@ logs/
 outputs/
 market_data/
 reports/
+
+# Project inventories
+bacqe_script_inventory.txt
+bacqe_scripts_tree.txt
+
+# Generated audits
+*_inventory.txt
+*_tree.txt
