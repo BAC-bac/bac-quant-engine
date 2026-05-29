@@ -1,16 +1,20 @@
 """
-BACQE TICK RESEARCH - 18 Analyse Intraday Tick Structure
+BACQE TICK RESEARCH - 18 Analyse Intraday Tick Structure - Multi Symbol
 
 Analyses microstructure regimes, returns, volatility, activity and imbalance
 by intraday session.
 
-Input:
-    E:/Quant_Lab/data/processed/tick_research/microstructure_regimes/GBPUSD_microstructure_regimes_latest.parquet
+Inputs:
+    E:/Quant_Lab/data/processed/tick_research/microstructure_regimes/symbol=<SYMBOL>/
 
 Outputs:
-    E:/Quant_Lab/data/analysis/tick_research/intraday_tick_structure_latest.csv
-    E:/Quant_Lab/data/analysis/tick_research/intraday_tick_structure_latest.parquet
-    E:/Quant_Lab/reports/tick_research/intraday_structure/intraday_tick_structure_report_latest.txt
+    Per-symbol:
+        E:/Quant_Lab/data/analysis/tick_research/intraday_structure/symbol=<SYMBOL>/
+        E:/Quant_Lab/reports/tick_research/intraday_structure/symbol=<SYMBOL>/
+
+    Master:
+        E:/Quant_Lab/data/analysis/tick_research/intraday_structure/_master/
+        E:/Quant_Lab/reports/tick_research/intraday_structure/_master/
 """
 
 from pathlib import Path
@@ -21,39 +25,48 @@ import pandas as pd
 
 DATA_LAKE_ROOT = Path(r"E:\Quant_Lab")
 
-SYMBOL = "GBPUSD"
+SYMBOLS = [
+    "GBPUSD",
+    "EURUSD",
+    "USDJPY",
+    "EURGBP",
+    "GBPJPY",
+    "XAUUSD",
+]
 
-INPUT_PATH = (
+INPUT_ROOT = (
     DATA_LAKE_ROOT
     / "data"
     / "processed"
     / "tick_research"
     / "microstructure_regimes"
-    / f"{SYMBOL}_microstructure_regimes_latest.parquet"
 )
 
-OUTPUT_ANALYSIS_DIR = DATA_LAKE_ROOT / "data" / "analysis" / "tick_research"
-OUTPUT_REPORT_DIR = DATA_LAKE_ROOT / "reports" / "tick_research" / "intraday_structure"
+OUTPUT_ANALYSIS_ROOT = (
+    DATA_LAKE_ROOT
+    / "data"
+    / "analysis"
+    / "tick_research"
+    / "intraday_structure"
+)
+
+OUTPUT_REPORT_ROOT = (
+    DATA_LAKE_ROOT
+    / "reports"
+    / "tick_research"
+    / "intraday_structure"
+)
 
 
 def classify_session(hour_utc: int) -> str:
-    """
-    Broad FX session classification using UTC.
-
-    These are deliberately broad v1 research buckets.
-    """
     if 0 <= hour_utc < 7:
         return "asia_overnight"
-
     if 7 <= hour_utc < 12:
         return "london_morning"
-
     if 12 <= hour_utc < 16:
         return "london_new_york_overlap"
-
     if 16 <= hour_utc < 21:
         return "new_york_afternoon"
-
     return "late_us_rollover"
 
 
@@ -62,7 +75,6 @@ def add_session_fields(df: pd.DataFrame) -> pd.DataFrame:
 
     data["bar_start_time"] = pd.to_datetime(data["bar_start_time"], errors="coerce", utc=True)
     data["bar_end_time"] = pd.to_datetime(data["bar_end_time"], errors="coerce", utc=True)
-
     data = data.dropna(subset=["bar_start_time"]).copy()
 
     data["date_utc"] = data["bar_start_time"].dt.date.astype(str)
@@ -87,7 +99,7 @@ def add_session_fields(df: pd.DataFrame) -> pd.DataFrame:
 
 def build_session_summary(data: pd.DataFrame) -> pd.DataFrame:
     summary = (
-        data.groupby(["bar_type", "bar_family", "session_utc"], dropna=False)
+        data.groupby(["symbol", "bar_type", "bar_family", "session_utc"], dropna=False)
         .agg(
             bars=("bar_type", "count"),
             unique_days=("date_utc", "nunique"),
@@ -132,17 +144,18 @@ def build_session_summary(data: pd.DataFrame) -> pd.DataFrame:
     }
 
     summary["session_order"] = summary["session_utc"].map(session_order).fillna(999)
-
     summary["analysis_time_utc"] = datetime.now(timezone.utc).isoformat()
 
-    summary = summary.sort_values(["bar_type", "session_order"]).drop(columns=["session_order"])
-
-    return summary.reset_index(drop=True)
+    return (
+        summary.sort_values(["symbol", "bar_type", "session_order"])
+        .drop(columns=["session_order"])
+        .reset_index(drop=True)
+    )
 
 
 def build_hourly_summary(data: pd.DataFrame) -> pd.DataFrame:
     summary = (
-        data.groupby(["bar_type", "bar_family", "hour_utc"], dropna=False)
+        data.groupby(["symbol", "bar_type", "bar_family", "hour_utc"], dropna=False)
         .agg(
             bars=("bar_type", "count"),
             avg_abs_return=("abs_return", "mean"),
@@ -167,13 +180,14 @@ def build_hourly_summary(data: pd.DataFrame) -> pd.DataFrame:
 
     summary["analysis_time_utc"] = datetime.now(timezone.utc).isoformat()
 
-    return summary.sort_values(["bar_type", "hour_utc"]).reset_index(drop=True)
+    return summary.sort_values(["symbol", "bar_type", "hour_utc"]).reset_index(drop=True)
 
 
-def build_report(session_summary: pd.DataFrame, hourly_summary: pd.DataFrame) -> str:
+def build_report(symbol: str, session_summary: pd.DataFrame, input_path: Path) -> str:
     now_utc = datetime.now(timezone.utc).isoformat()
 
     key_cols = [
+        "symbol",
         "bar_type",
         "session_utc",
         "bars",
@@ -191,61 +205,65 @@ def build_report(session_summary: pd.DataFrame, hourly_summary: pd.DataFrame) ->
 
     available_key_cols = [col for col in key_cols if col in session_summary.columns]
 
-    lines = []
-
-    lines.append("=" * 90)
-    lines.append("BACQE TICK RESEARCH - INTRADAY TICK STRUCTURE REPORT")
-    lines.append("=" * 90)
-    lines.append(f"Report time UTC: {now_utc}")
-    lines.append(f"Symbol:          {SYMBOL}")
-    lines.append(f"Input:           {INPUT_PATH}")
-    lines.append("-" * 90)
-    lines.append("")
-    lines.append("SESSION SUMMARY")
-    lines.append("-" * 90)
-    lines.append(session_summary[available_key_cols].to_string(index=False))
-    lines.append("")
-    lines.append("INTERPRETATION NOTES")
-    lines.append("-" * 90)
-    lines.append("Sessions are broad UTC buckets for research diagnostics.")
-    lines.append("London/New York overlap should often show stronger activity and volatility.")
-    lines.append("Directional imbalance percentage is only meaningful for imbalance bar types.")
-    lines.append("Fixed tick bars mainly show activity/volatility structure rather than directional pressure.")
-    lines.append("This is diagnostic research, not a trading signal.")
-    lines.append("=" * 90)
-
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            "=" * 90,
+            f"BACQE TICK RESEARCH - INTRADAY TICK STRUCTURE REPORT - {symbol}",
+            "=" * 90,
+            f"Report time UTC: {now_utc}",
+            f"Input:           {input_path}",
+            "-" * 90,
+            "",
+            "SESSION SUMMARY",
+            "-" * 90,
+            session_summary[available_key_cols].to_string(index=False),
+            "",
+            "INTERPRETATION NOTES",
+            "-" * 90,
+            "Sessions are broad UTC buckets for research diagnostics.",
+            "London/New York overlap should often show stronger activity and volatility.",
+            "Directional imbalance percentage is mainly meaningful for imbalance bar types.",
+            "This is diagnostic research, not a trading signal.",
+            "=" * 90,
+        ]
+    )
 
 
-def main() -> None:
-    print("=" * 90)
-    print("BACQE TICK RESEARCH - 18 ANALYSE INTRADAY TICK STRUCTURE")
-    print("=" * 90)
-    print(f"Input: {INPUT_PATH}")
+def process_symbol(symbol: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     print("-" * 90)
+    print(f"[SYMBOL] {symbol}")
 
-    if not INPUT_PATH.exists():
-        raise FileNotFoundError(f"Microstructure regimes file not found: {INPUT_PATH}")
+    input_path = (
+        INPUT_ROOT
+        / f"symbol={symbol}"
+        / f"{symbol}_microstructure_regimes_latest.parquet"
+    )
 
-    regimes = pd.read_parquet(INPUT_PATH)
+    if not input_path.exists():
+        print(f"[WARN] {symbol}: regime file not found: {input_path}")
+        return pd.DataFrame(), pd.DataFrame()
 
-    print(f"Rows loaded: {len(regimes):,}")
+    regimes = pd.read_parquet(input_path)
+    print(f"[INFO] {symbol}: rows loaded: {len(regimes):,}")
 
     data = add_session_fields(regimes)
 
     session_summary = build_session_summary(data)
     hourly_summary = build_hourly_summary(data)
 
-    OUTPUT_ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    analysis_dir = OUTPUT_ANALYSIS_ROOT / f"symbol={symbol}"
+    report_dir = OUTPUT_REPORT_ROOT / f"symbol={symbol}"
 
-    session_csv = OUTPUT_ANALYSIS_DIR / "intraday_tick_structure_latest.csv"
-    session_parquet = OUTPUT_ANALYSIS_DIR / "intraday_tick_structure_latest.parquet"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
 
-    hourly_csv = OUTPUT_ANALYSIS_DIR / "intraday_tick_structure_hourly_latest.csv"
-    hourly_parquet = OUTPUT_ANALYSIS_DIR / "intraday_tick_structure_hourly_latest.parquet"
+    session_csv = analysis_dir / f"{symbol}_intraday_tick_structure_session_latest.csv"
+    session_parquet = analysis_dir / f"{symbol}_intraday_tick_structure_session_latest.parquet"
 
-    report_path = OUTPUT_REPORT_DIR / "intraday_tick_structure_report_latest.txt"
+    hourly_csv = analysis_dir / f"{symbol}_intraday_tick_structure_hourly_latest.csv"
+    hourly_parquet = analysis_dir / f"{symbol}_intraday_tick_structure_hourly_latest.parquet"
+
+    report_path = report_dir / f"{symbol}_intraday_tick_structure_report_latest.txt"
 
     session_summary.to_csv(session_csv, index=False)
     session_summary.to_parquet(session_parquet, index=False)
@@ -253,33 +271,110 @@ def main() -> None:
     hourly_summary.to_csv(hourly_csv, index=False)
     hourly_summary.to_parquet(hourly_parquet, index=False)
 
-    report = build_report(session_summary, hourly_summary)
+    report = build_report(symbol, session_summary, input_path)
     report_path.write_text(report, encoding="utf-8")
 
-    print("[DONE] Intraday tick structure analysis created.")
-    print(f"Session CSV:     {session_csv}")
-    print(f"Session Parquet: {session_parquet}")
-    print(f"Hourly CSV:      {hourly_csv}")
-    print(f"Hourly Parquet:  {hourly_parquet}")
-    print(f"Report:          {report_path}")
-    print("-" * 90)
+    print(f"[DONE] {symbol}: session CSV: {session_csv}")
+    print(f"[DONE] {symbol}: hourly CSV:  {hourly_csv}")
+    print(f"[DONE] {symbol}: report:      {report_path}")
+
+    return session_summary, hourly_summary
+
+
+def save_master_outputs(
+    all_sessions: list[pd.DataFrame],
+    all_hourly: list[pd.DataFrame],
+) -> None:
+    master_analysis_dir = OUTPUT_ANALYSIS_ROOT / "_master"
+    master_report_dir = OUTPUT_REPORT_ROOT / "_master"
+
+    master_analysis_dir.mkdir(parents=True, exist_ok=True)
+    master_report_dir.mkdir(parents=True, exist_ok=True)
+
+    master_session = pd.concat(all_sessions, ignore_index=True)
+    master_hourly = pd.concat(all_hourly, ignore_index=True)
+
+    session_csv = master_analysis_dir / "master_intraday_tick_structure_session_latest.csv"
+    session_parquet = master_analysis_dir / "master_intraday_tick_structure_session_latest.parquet"
+
+    hourly_csv = master_analysis_dir / "master_intraday_tick_structure_hourly_latest.csv"
+    hourly_parquet = master_analysis_dir / "master_intraday_tick_structure_hourly_latest.parquet"
+
+    master_session.to_csv(session_csv, index=False)
+    master_session.to_parquet(session_parquet, index=False)
+
+    master_hourly.to_csv(hourly_csv, index=False)
+    master_hourly.to_parquet(hourly_parquet, index=False)
+
+    report_path = master_report_dir / "master_intraday_tick_structure_report_latest.txt"
 
     display_cols = [
+        "symbol",
         "bar_type",
         "session_utc",
         "bars",
         "avg_abs_return",
         "return_std",
         "avg_range",
-        "avg_duration_seconds",
-        "avg_tick_count",
         "directional_imbalance_pct",
         "volatility_expansion_pct",
     ]
 
-    available_display_cols = [col for col in display_cols if col in session_summary.columns]
+    available_cols = [col for col in display_cols if col in master_session.columns]
 
-    print(session_summary[available_display_cols].to_string(index=False))
+    report_path.write_text(
+        "\n".join(
+            [
+                "=" * 90,
+                "BACQE TICK RESEARCH - MASTER INTRADAY STRUCTURE REPORT",
+                "=" * 90,
+                f"Report time UTC: {datetime.now(timezone.utc).isoformat()}",
+                "-" * 90,
+                master_session[available_cols].to_string(index=False),
+                "=" * 90,
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    print("-" * 90)
+    print("[DONE] Master intraday outputs created.")
+    print(f"Master session CSV: {session_csv}")
+    print(f"Master hourly CSV:  {hourly_csv}")
+    print(f"Master report:      {report_path}")
+
+
+def main() -> None:
+    print("=" * 90)
+    print("BACQE TICK RESEARCH - 18 ANALYSE INTRADAY TICK STRUCTURE - MULTI SYMBOL")
+    print("=" * 90)
+    print(f"Input root:           {INPUT_ROOT}")
+    print(f"Output analysis root: {OUTPUT_ANALYSIS_ROOT}")
+    print(f"Output report root:   {OUTPUT_REPORT_ROOT}")
+    print(f"Symbols:              {SYMBOLS}")
+    print("-" * 90)
+
+    all_sessions = []
+    all_hourly = []
+
+    for symbol in SYMBOLS:
+        session_summary, hourly_summary = process_symbol(symbol)
+
+        if not session_summary.empty:
+            all_sessions.append(session_summary)
+
+        if not hourly_summary.empty:
+            all_hourly.append(hourly_summary)
+
+    if not all_sessions or not all_hourly:
+        print("[WARN] No intraday structure summaries created.")
+        return
+
+    save_master_outputs(all_sessions, all_hourly)
+
+    print("-" * 90)
+    print("[COMPLETE] Multi-symbol intraday tick structure analysis complete.")
+    print(f"Symbols analysed: {len(all_sessions)}")
     print("=" * 90)
 
 
