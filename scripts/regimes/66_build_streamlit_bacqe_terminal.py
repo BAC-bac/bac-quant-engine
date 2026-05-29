@@ -79,6 +79,26 @@ VOL_CLUSTERING_WINNERS_PATH = (
     / "symbol_winners_volatility_clustering_latest.csv"
 )
 
+BAR_ENTROPY_MASTER_PATH = (
+    DATA_LAKE_ROOT
+    / "data"
+    / "analysis"
+    / "tick_research"
+    / "bar_entropy"
+    / "_master"
+    / "master_bar_entropy_analysis_latest.csv"
+)
+
+BAR_ENTROPY_WINNERS_PATH = (
+    DATA_LAKE_ROOT
+    / "data"
+    / "analysis"
+    / "tick_research"
+    / "bar_entropy"
+    / "_master"
+    / "symbol_winners_bar_entropy_latest.csv"
+)
+
 TICK_CHART_ROOT = (
     DATA_LAKE_ROOT
     / "reports"
@@ -139,6 +159,9 @@ tick_winners = read_csv(TICK_WINNERS_PATH)
 
 vol_clustering = read_csv(VOL_CLUSTERING_MASTER_PATH)
 vol_winners = read_csv(VOL_CLUSTERING_WINNERS_PATH)
+
+bar_entropy = read_csv(BAR_ENTROPY_MASTER_PATH)
+entropy_winners = read_csv(BAR_ENTROPY_WINNERS_PATH)
 
 st.title("BACQE Adaptive Operator Terminal")
 
@@ -303,6 +326,44 @@ with tab_tick_research:
                 st.bar_chart(
                     vol_winners.set_index("symbol")["volatility_clustering_score"]
                 )
+                
+                st.divider()
+
+        st.subheader("Entropy Structure Winners")
+
+        if entropy_winners.empty:
+            st.warning("Entropy winner summary not found.")
+        else:
+            entropy_cols = [
+                "symbol",
+                "bar_type",
+                "bar_family",
+                "bar_count",
+                "direction_entropy_normalized",
+                "return_sign_entropy_normalized",
+                "direction_transition_entropy",
+                "return_sign_transition_entropy",
+                "return_sign_same_direction_pct",
+                "entropy_structure_score",
+            ]
+
+            available_entropy_cols = [
+                col for col in entropy_cols if col in entropy_winners.columns
+            ]
+
+            st.dataframe(
+                entropy_winners[available_entropy_cols],
+                use_container_width=True,
+            )
+
+            if {
+                "symbol",
+                "entropy_structure_score",
+            }.issubset(entropy_winners.columns):
+                st.caption("Highest entropy structure score by symbol")
+                st.bar_chart(
+                    entropy_winners.set_index("symbol")["entropy_structure_score"]
+                )
 
         st.divider()
 
@@ -435,6 +496,38 @@ with tab_tick_research:
                 st.caption("Top 15 volatility clustering scores")
                 st.bar_chart(
                     top_vol.set_index("label")["volatility_clustering_score"]
+                )
+                
+                st.divider()
+
+        st.subheader("Master Entropy Structure Ranking")
+
+        if bar_entropy.empty:
+            st.warning("Master entropy analysis not found.")
+        else:
+            st.dataframe(bar_entropy, use_container_width=True)
+
+            if {
+                "symbol",
+                "bar_type",
+                "entropy_structure_score",
+            }.issubset(bar_entropy.columns):
+                top_entropy = (
+                    bar_entropy
+                    .sort_values("entropy_structure_score", ascending=False)
+                    .head(15)
+                    .copy()
+                )
+
+                top_entropy["label"] = (
+                    top_entropy["symbol"].astype(str)
+                    + " | "
+                    + top_entropy["bar_type"].astype(str)
+                )
+
+                st.caption("Top 15 entropy structure scores")
+                st.bar_chart(
+                    top_entropy.set_index("label")["entropy_structure_score"]
                 )
 
         st.divider()
