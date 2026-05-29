@@ -1,16 +1,18 @@
 """
-BACQE TICK RESEARCH - 11 Compare Tick Bars vs Tick Imbalance Bars
+BACQE TICK RESEARCH - 11 Compare Tick Bars vs Tick Imbalance Bars - Multi Symbol
 
-Compares:
-    tick_1000
-    imbalance_25
-    imbalance_50
-    imbalance_100
-    imbalance_200
+Compares fixed tick bars against fixed-threshold tick imbalance bars.
+
+Inputs:
+    data/processed/tick_research/tick_bars/symbol=<SYMBOL>
+    data/processed/tick_research/tick_imbalance_bars/symbol=<SYMBOL>
 
 Outputs:
-    E:/Quant_Lab/data/analysis/tick_research/tick_vs_imbalance_bar_comparison_latest.csv
-    E:/Quant_Lab/data/analysis/tick_research/tick_vs_imbalance_bar_comparison_latest.parquet
+    Per-symbol comparison files:
+        data/analysis/tick_research/tick_vs_imbalance/symbol=<SYMBOL>/
+
+    Master comparison files:
+        data/analysis/tick_research/tick_vs_imbalance/
 """
 
 from pathlib import Path
@@ -21,31 +23,79 @@ import pandas as pd
 
 DATA_LAKE_ROOT = Path(r"E:\Quant_Lab")
 
-SYMBOL = "GBPUSD"
 BROKER = "FTMO"
 
-TICK_BAR_ROOT = (
-    DATA_LAKE_ROOT
-    / "data"
-    / "processed"
-    / "tick_research"
-    / "tick_bars"
-    / f"symbol={SYMBOL}"
-)
-
-IMBALANCE_BAR_ROOT = (
-    DATA_LAKE_ROOT
-    / "data"
-    / "processed"
-    / "tick_research"
-    / "tick_imbalance_bars"
-    / f"symbol={SYMBOL}"
-)
-
-OUTPUT_DIR = DATA_LAKE_ROOT / "data" / "analysis" / "tick_research"
+SYMBOLS = [
+    "GBPUSD",
+    "EURUSD",
+    "USDJPY",
+    "EURGBP",
+    "GBPJPY",
+    "XAUUSD",
+]
 
 TICK_SIZES = [100, 250, 500, 1000]
 IMBALANCE_THRESHOLDS = [25, 50, 100, 200]
+
+TICK_BAR_ROOT = DATA_LAKE_ROOT / "data" / "processed" / "tick_research" / "tick_bars"
+IMBALANCE_BAR_ROOT = DATA_LAKE_ROOT / "data" / "processed" / "tick_research" / "tick_imbalance_bars"
+
+OUTPUT_ROOT = DATA_LAKE_ROOT / "data" / "analysis" / "tick_research" / "tick_vs_imbalance"
+
+# ==========================================================
+# HELPERS
+# ==========================================================
+
+def normalise_bar_columns(bars: pd.DataFrame) -> pd.DataFrame:
+    bars = bars.copy()
+
+    # Standardise time column names
+    if "bar_start_time" not in bars.columns and "start_time" in bars.columns:
+        bars["bar_start_time"] = bars["start_time"]
+
+    if "bar_end_time" not in bars.columns and "end_time" in bars.columns:
+        bars["bar_end_time"] = bars["end_time"]
+
+    # Standardise OHLC column names
+    if "open" not in bars.columns and "open_mid" in bars.columns:
+        bars["open"] = bars["open_mid"]
+
+    if "high" not in bars.columns and "high_mid" in bars.columns:
+        bars["high"] = bars["high_mid"]
+
+    if "low" not in bars.columns and "low_mid" in bars.columns:
+        bars["low"] = bars["low_mid"]
+
+    if "close" not in bars.columns and "close_mid" in bars.columns:
+        bars["close"] = bars["close_mid"]
+
+    # Standardise spread column names
+    if "avg_spread" not in bars.columns and "mean_spread" in bars.columns:
+        bars["avg_spread"] = bars["mean_spread"]
+
+    # Build duration if missing
+    if "duration_seconds" not in bars.columns:
+        if "bar_start_time" in bars.columns and "bar_end_time" in bars.columns:
+            start = pd.to_datetime(bars["bar_start_time"], errors="coerce", utc=True)
+            end = pd.to_datetime(bars["bar_end_time"], errors="coerce", utc=True)
+            bars["duration_seconds"] = (end - start).dt.total_seconds()
+
+    # Build missing derived columns
+    if "range" not in bars.columns:
+        bars["range"] = bars["high"] - bars["low"]
+
+    if "return" not in bars.columns:
+        bars["return"] = bars["close"].pct_change()
+
+    if "log_return" not in bars.columns:
+        bars["log_return"] = np.log(bars["close"] / bars["close"].shift(1))
+
+    if "direction" not in bars.columns:
+        bars["direction"] = 0
+        bars.loc[bars["close"] > bars["open"], "direction"] = 1
+        bars.loc[bars["close"] < bars["open"], "direction"] = -1
+
+    return bars
 
 
 def lag1_autocorr(series: pd.Series) -> float | None:
@@ -57,45 +107,57 @@ def lag1_autocorr(series: pd.Series) -> float | None:
     return clean.autocorr(lag=1)
 
 
-def load_tick_bars(tick_size: int) -> pd.DataFrame:
+def load_tick_bars(symbol: str, tick_size: int) -> pd.DataFrame:
     path = (
         TICK_BAR_ROOT
+        / f"symbol={symbol}"
         / f"tick_size={tick_size}"
-        / f"{SYMBOL}_tick_bars_{tick_size}_latest.parquet"
+        / f"{symbol}_tick_bars_{tick_size}_latest.parquet"
     )
 
     if not path.exists():
-        raise FileNotFoundError(f"Tick bar file not found: {path}")
+        print(f"[WARN] {symbol}: tick bar file not found: {path}")
+        return pd.DataFrame()
 
     bars = pd.read_parquet(path)
 
+    bars["symbol"] = symbol
+    bars["broker"] = BROKER
     bars["bar_family"] = "fixed_tick"
     bars["bar_type"] = f"tick_{tick_size}"
     bars["bar_parameter"] = str(tick_size)
 
+    bars = normalise_bar_columns(bars)
+
     return bars
 
 
-def load_imbalance_bars(threshold: int) -> pd.DataFrame:
+def load_imbalance_bars(symbol: str, threshold: int) -> pd.DataFrame:
     path = (
         IMBALANCE_BAR_ROOT
+        / f"symbol={symbol}"
         / f"imbalance_threshold={threshold}"
-        / f"{SYMBOL}_tick_imbalance_bars_{threshold}_latest.parquet"
+        / f"{symbol}_tick_imbalance_bars_{threshold}_latest.parquet"
     )
 
     if not path.exists():
-        raise FileNotFoundError(f"Imbalance bar file not found: {path}")
+        print(f"[WARN] {symbol}: imbalance bar file not found: {path}")
+        return pd.DataFrame()
 
     bars = pd.read_parquet(path)
 
+    bars["symbol"] = symbol
+    bars["broker"] = BROKER
     bars["bar_family"] = "tick_imbalance"
     bars["bar_type"] = f"imbalance_{threshold}"
     bars["bar_parameter"] = str(threshold)
 
+    bars = normalise_bar_columns(bars)
+
     return bars
 
 
-def summarise_bars(bars: pd.DataFrame) -> dict:
+def summarise_bars(symbol: str, bars: pd.DataFrame) -> dict:
     returns = bars["return"].replace([np.inf, -np.inf], np.nan).dropna()
     log_returns = bars["log_return"].replace([np.inf, -np.inf], np.nan).dropna()
 
@@ -108,7 +170,7 @@ def summarise_bars(bars: pd.DataFrame) -> dict:
     bar_count = len(bars)
 
     summary = {
-        "symbol": SYMBOL,
+        "symbol": symbol,
         "broker": BROKER,
         "bar_family": bars["bar_family"].iloc[0],
         "bar_type": bars["bar_type"].iloc[0],
@@ -178,31 +240,7 @@ def summarise_bars(bars: pd.DataFrame) -> dict:
     return summary
 
 
-def main() -> None:
-    print("=" * 90)
-    print("BACQE TICK RESEARCH - 11 COMPARE TICK VS IMBALANCE BARS")
-    print("=" * 90)
-    print(f"Symbol: {SYMBOL}")
-    print(f"Broker: {BROKER}")
-    print("-" * 90)
-
-    records = []
-
-    for tick_size in TICK_SIZES:
-        bars = load_tick_bars(tick_size)
-        records.append(summarise_bars(bars))
-        print(f"[DONE] Loaded tick bars: {tick_size} | bars={len(bars):,}")
-
-    for threshold in IMBALANCE_THRESHOLDS:
-        bars = load_imbalance_bars(threshold)
-        records.append(summarise_bars(bars))
-        print(f"[DONE] Loaded imbalance bars: {threshold} | bars={len(bars):,}")
-
-    comparison = pd.DataFrame(records)
-
-    numeric_cols = comparison.select_dtypes(include=["float", "int"]).columns
-    comparison[numeric_cols] = comparison[numeric_cols].round(8)
-
+def sort_comparison(comparison: pd.DataFrame) -> pd.DataFrame:
     order = {
         "tick_100": 1,
         "tick_250": 2,
@@ -216,24 +254,69 @@ def main() -> None:
 
     comparison["sort_order"] = comparison["bar_type"].map(order).fillna(999)
 
-    comparison = comparison.sort_values("sort_order").drop(columns=["sort_order"]).reset_index(drop=True)
+    return (
+        comparison
+        .sort_values(["symbol", "sort_order"])
+        .drop(columns=["sort_order"])
+        .reset_index(drop=True)
+    )
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    csv_path = OUTPUT_DIR / "tick_vs_imbalance_bar_comparison_latest.csv"
-    parquet_path = OUTPUT_DIR / "tick_vs_imbalance_bar_comparison_latest.parquet"
+def save_symbol_comparison(symbol: str, comparison: pd.DataFrame) -> None:
+    output_dir = OUTPUT_ROOT / f"symbol={symbol}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_path = output_dir / f"{symbol}_tick_vs_imbalance_bar_comparison_latest.csv"
+    parquet_path = output_dir / f"{symbol}_tick_vs_imbalance_bar_comparison_latest.parquet"
 
     comparison.to_csv(csv_path, index=False)
     comparison.to_parquet(parquet_path, index=False)
 
+    print(f"[DONE] {symbol}: comparison saved.")
+    print(f"       Rows:    {len(comparison):,}")
+    print(f"       CSV:     {csv_path}")
+    print(f"       Parquet: {parquet_path}")
+
+
+def process_symbol(symbol: str) -> pd.DataFrame:
     print("-" * 90)
-    print("[DONE] Tick vs imbalance bar comparison created.")
-    print(f"Rows:      {len(comparison):,}")
-    print(f"CSV:       {csv_path}")
-    print(f"Parquet:   {parquet_path}")
-    print("-" * 90)
+    print(f"[SYMBOL] {symbol}")
+
+    records = []
+
+    for tick_size in TICK_SIZES:
+        bars = load_tick_bars(symbol, tick_size)
+
+        if bars.empty:
+            continue
+
+        records.append(summarise_bars(symbol, bars))
+        print(f"[DONE] {symbol}: loaded tick bars {tick_size} | bars={len(bars):,}")
+
+    for threshold in IMBALANCE_THRESHOLDS:
+        bars = load_imbalance_bars(symbol, threshold)
+
+        if bars.empty:
+            continue
+
+        records.append(summarise_bars(symbol, bars))
+        print(f"[DONE] {symbol}: loaded imbalance bars {threshold} | bars={len(bars):,}")
+
+    if not records:
+        print(f"[WARN] {symbol}: no comparison records created.")
+        return pd.DataFrame()
+
+    comparison = pd.DataFrame(records)
+
+    numeric_cols = comparison.select_dtypes(include=["float", "int"]).columns
+    comparison[numeric_cols] = comparison[numeric_cols].round(8)
+
+    comparison = sort_comparison(comparison)
+
+    save_symbol_comparison(symbol, comparison)
 
     display_cols = [
+        "symbol",
         "bar_type",
         "bar_count",
         "avg_duration_seconds",
@@ -250,6 +333,53 @@ def main() -> None:
     ]
 
     print(comparison[display_cols].to_string(index=False))
+
+    return comparison
+
+
+def main() -> None:
+    print("=" * 90)
+    print("BACQE TICK RESEARCH - 11 COMPARE TICK VS IMBALANCE BARS - MULTI SYMBOL")
+    print("=" * 90)
+    print(f"Broker:              {BROKER}")
+    print(f"Tick bar root:        {TICK_BAR_ROOT}")
+    print(f"Imbalance bar root:   {IMBALANCE_BAR_ROOT}")
+    print(f"Output root:          {OUTPUT_ROOT}")
+    print(f"Symbols:              {SYMBOLS}")
+    print(f"Tick sizes:           {TICK_SIZES}")
+    print(f"Imbalance thresholds: {IMBALANCE_THRESHOLDS}")
+    print("=" * 90)
+
+    all_comparisons = []
+
+    for symbol in SYMBOLS:
+        comparison = process_symbol(symbol)
+
+        if not comparison.empty:
+            all_comparisons.append(comparison)
+
+    if not all_comparisons:
+        print("[WARN] No comparison files were created.")
+        return
+
+    master = pd.concat(all_comparisons, ignore_index=True)
+    master = sort_comparison(master)
+
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+
+    master_csv = OUTPUT_ROOT / "tick_vs_imbalance_bar_comparison_latest.csv"
+    master_parquet = OUTPUT_ROOT / "tick_vs_imbalance_bar_comparison_latest.parquet"
+
+    master.to_csv(master_csv, index=False)
+    master.to_parquet(master_parquet, index=False)
+
+    print("-" * 90)
+    print("[COMPLETE] Multi-symbol tick vs imbalance comparison created.")
+    print(f"Symbols compared: {master['symbol'].nunique()}")
+    print(f"Rows:             {len(master):,}")
+    print(f"CSV:              {master_csv}")
+    print(f"Parquet:          {master_parquet}")
+    print("=" * 90)
 
 
 if __name__ == "__main__":
