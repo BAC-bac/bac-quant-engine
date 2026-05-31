@@ -1,9 +1,7 @@
 """
-BACQE TICK RESEARCH - 25 Audit Microstructure / Regime Alignment
+BACQE TICK RESEARCH - 25 Audit Microstructure / Regime Alignment - Multi Symbol
 
-Phase 3 starting point.
-
-Audits whether the GBPUSD microstructure feature store can be aligned with
+Audits whether each symbol's microstructure feature store can be aligned with
 BACQE regime-engine outputs.
 
 This script does NOT merge yet.
@@ -16,16 +14,24 @@ import pandas as pd
 
 
 DATA_LAKE_ROOT = Path(r"E:\Quant_Lab")
-SYMBOL = "GBPUSD"
+
+SYMBOLS = [
+    "GBPUSD",
+    "EURUSD",
+    "USDJPY",
+    "EURGBP",
+    "GBPJPY",
+    "XAUUSD",
+]
+
 BROKER = "FTMO"
 
-MICRO_FEATURE_PATH = (
+MICRO_FEATURE_ROOT = (
     DATA_LAKE_ROOT
     / "data"
     / "processed"
     / "tick_research"
     / "feature_store"
-    / f"{SYMBOL}_microstructure_feature_store_latest.parquet"
 )
 
 REGIME_SEARCH_ROOTS = [
@@ -35,38 +41,70 @@ REGIME_SEARCH_ROOTS = [
     DATA_LAKE_ROOT / "data" / "analysis" / "regime_forecasts" / BROKER,
 ]
 
-OUTPUT_DIR = DATA_LAKE_ROOT / "data" / "analysis" / "tick_research"
+OUTPUT_ANALYSIS_ROOT = (
+    DATA_LAKE_ROOT
+    / "data"
+    / "analysis"
+    / "tick_research"
+    / "microstructure_regime_alignment_audit"
+)
 
-OUTPUT_CSV = OUTPUT_DIR / "microstructure_regime_alignment_audit_latest.csv"
-OUTPUT_PARQUET = OUTPUT_DIR / "microstructure_regime_alignment_audit_latest.parquet"
+OUTPUT_REPORT_ROOT = (
+    DATA_LAKE_ROOT
+    / "reports"
+    / "tick_research"
+    / "microstructure_regime_alignment_audit"
+)
 
 
-def load_microstructure_window() -> dict:
-    if not MICRO_FEATURE_PATH.exists():
-        raise FileNotFoundError(f"Microstructure feature store not found: {MICRO_FEATURE_PATH}")
+def get_micro_feature_path(symbol: str) -> Path:
+    return (
+        MICRO_FEATURE_ROOT
+        / f"symbol={symbol}"
+        / f"{symbol}_microstructure_feature_store_latest.parquet"
+    )
 
-    micro = pd.read_parquet(MICRO_FEATURE_PATH)
 
-    micro["bar_start_time"] = pd.to_datetime(micro["bar_start_time"], errors="coerce", utc=True)
-    micro["bar_end_time"] = pd.to_datetime(micro["bar_end_time"], errors="coerce", utc=True)
+def load_microstructure_window(symbol: str) -> dict:
+    micro_path = get_micro_feature_path(symbol)
+
+    if not micro_path.exists():
+        raise FileNotFoundError(f"Microstructure feature store not found: {micro_path}")
+
+    micro = pd.read_parquet(micro_path)
+
+    micro["bar_start_time"] = pd.to_datetime(
+        micro["bar_start_time"],
+        errors="coerce",
+        utc=True,
+    )
+    micro["bar_end_time"] = pd.to_datetime(
+        micro["bar_end_time"],
+        errors="coerce",
+        utc=True,
+    )
 
     return {
+        "symbol": symbol,
+        "micro_feature_path": str(micro_path),
         "micro_rows": len(micro),
         "micro_columns": len(micro.columns),
         "micro_start": micro["bar_start_time"].min(),
         "micro_end": micro["bar_end_time"].max(),
-        "micro_bar_types": "|".join(sorted(micro["bar_type"].dropna().astype(str).unique())),
+        "micro_bar_types": "|".join(
+            sorted(micro["bar_type"].dropna().astype(str).unique())
+        ),
     }
 
 
-def find_candidate_regime_files() -> list[Path]:
+def find_candidate_regime_files(symbol: str) -> list[Path]:
     candidates = []
 
     patterns = [
-        f"*{SYMBOL}*.parquet",
-        f"*{SYMBOL}*.csv",
-        f"*{SYMBOL.lower()}*.parquet",
-        f"*{SYMBOL.lower()}*.csv",
+        f"*{symbol}*.parquet",
+        f"*{symbol}*.csv",
+        f"*{symbol.lower()}*.parquet",
+        f"*{symbol.lower()}*.csv",
     ]
 
     for root in REGIME_SEARCH_ROOTS:
@@ -76,9 +114,7 @@ def find_candidate_regime_files() -> list[Path]:
         for pattern in patterns:
             candidates.extend(root.rglob(pattern))
 
-    unique_candidates = sorted(set(candidates))
-
-    return unique_candidates
+    return sorted(set(candidates))
 
 
 def guess_timestamp_columns(columns: list[str]) -> list[str]:
@@ -92,18 +128,52 @@ def guess_timestamp_columns(columns: list[str]) -> list[str]:
         "close_time",
     ]
 
-    guesses = []
-
-    for col in columns:
-        lower = col.lower()
-        if any(keyword in lower for keyword in timestamp_keywords):
-            guesses.append(col)
-
-    return guesses
+    return [
+        col for col in columns
+        if any(keyword in col.lower() for keyword in timestamp_keywords)
+    ]
 
 
-def profile_candidate_file(file_path: Path, micro_window: dict) -> dict:
+def detect_timeframes(df: pd.DataFrame) -> str | None:
+    timeframe_cols = [
+        col for col in df.columns
+        if "timeframe" in col.lower() or col.lower() in {"tf", "period"}
+    ]
+
+    if not timeframe_cols:
+        return None
+
+    values = []
+
+    for col in timeframe_cols:
+        sample = df[col].dropna().astype(str).unique()[:30]
+        values.extend(sample)
+
+    return "|".join(sorted(set(values))) if values else None
+
+
+def detect_regime_columns(df: pd.DataFrame) -> str | None:
+    regime_cols = [
+        col for col in df.columns
+        if "regime" in col.lower()
+        or "trend_state" in col.lower()
+        or "volatility_state" in col.lower()
+        or "momentum_state" in col.lower()
+        or "forecast" in col.lower()
+        or "state" in col.lower()
+    ]
+
+    return "|".join(regime_cols) if regime_cols else None
+
+
+def profile_candidate_file(
+    symbol: str,
+    file_path: Path,
+    micro_window: dict,
+) -> dict:
     record = {
+        "symbol": symbol,
+        "broker": BROKER,
         "file_path": str(file_path),
         "file_name": file_path.name,
         "parent_folder": str(file_path.parent),
@@ -117,6 +187,12 @@ def profile_candidate_file(file_path: Path, micro_window: dict) -> dict:
         "chosen_timestamp_column": None,
         "regime_start": None,
         "regime_end": None,
+        "micro_start": micro_window["micro_start"].isoformat()
+        if pd.notna(micro_window["micro_start"])
+        else None,
+        "micro_end": micro_window["micro_end"].isoformat()
+        if pd.notna(micro_window["micro_end"])
+        else None,
         "overlap_start": None,
         "overlap_end": None,
         "overlap_seconds": None,
@@ -145,23 +221,8 @@ def profile_candidate_file(file_path: Path, micro_window: dict) -> dict:
         timestamp_candidates = guess_timestamp_columns(list(df.columns))
         record["timestamp_column_candidates"] = "|".join(timestamp_candidates)
 
-        timeframe_cols = [col for col in df.columns if "timeframe" in col.lower() or col.lower() in {"tf", "period"}]
-        if timeframe_cols:
-            values = []
-            for col in timeframe_cols:
-                sample = df[col].dropna().astype(str).unique()[:20]
-                values.extend(sample)
-            record["timeframes_detected"] = "|".join(sorted(set(values)))
-
-        regime_cols = [
-            col for col in df.columns
-            if "regime" in col.lower()
-            or "trend_state" in col.lower()
-            or "volatility_state" in col.lower()
-            or "momentum_state" in col.lower()
-            or "forecast" in col.lower()
-        ]
-        record["regime_columns_detected"] = "|".join(regime_cols)
+        record["timeframes_detected"] = detect_timeframes(df)
+        record["regime_columns_detected"] = detect_regime_columns(df)
 
         chosen_col = None
         best_non_null = 0
@@ -216,59 +277,76 @@ def profile_candidate_file(file_path: Path, micro_window: dict) -> dict:
         return record
 
 
-def main() -> None:
-    print("=" * 90)
-    print("BACQE TICK RESEARCH - 25 AUDIT MICROSTRUCTURE / REGIME ALIGNMENT")
-    print("=" * 90)
-    print(f"Symbol: {SYMBOL}")
-    print(f"Micro feature store: {MICRO_FEATURE_PATH}")
-    print("-" * 90)
-
-    micro_window = load_microstructure_window()
-
-    print("Microstructure window:")
-    print(f"Rows:      {micro_window['micro_rows']:,}")
-    print(f"Columns:   {micro_window['micro_columns']:,}")
-    print(f"Start:     {micro_window['micro_start']}")
-    print(f"End:       {micro_window['micro_end']}")
-    print(f"Bar types: {micro_window['micro_bar_types']}")
-    print("-" * 90)
-
-    candidates = find_candidate_regime_files()
-
-    print(f"Candidate regime files found: {len(candidates):,}")
-    print("-" * 90)
-
-    records = []
-
-    if not candidates:
-        print("[WARN] No candidate regime files found.")
+def build_symbol_summary(
+    symbol: str,
+    micro_window: dict,
+    audit: pd.DataFrame,
+) -> pd.DataFrame:
+    if audit.empty:
+        overlap_files = 0
+        best_overlap_days = 0
+        candidate_files = 0
     else:
-        for i, file_path in enumerate(candidates, start=1):
-            print(f"[{i}/{len(candidates)}] Auditing: {file_path}")
-            record = profile_candidate_file(file_path, micro_window)
-            records.append(record)
+        candidate_files = len(audit)
+        overlap_files = int((audit["overlap_status"] == "overlap").sum())
+        best_overlap_days = pd.to_numeric(
+            audit["overlap_days"],
+            errors="coerce",
+        ).max()
 
-    audit = pd.DataFrame(records)
+    return pd.DataFrame(
+        [
+            {
+                "symbol": symbol,
+                "broker": BROKER,
+                "micro_rows": micro_window["micro_rows"],
+                "micro_columns": micro_window["micro_columns"],
+                "micro_start": micro_window["micro_start"].isoformat()
+                if pd.notna(micro_window["micro_start"])
+                else None,
+                "micro_end": micro_window["micro_end"].isoformat()
+                if pd.notna(micro_window["micro_end"])
+                else None,
+                "micro_bar_types": micro_window["micro_bar_types"],
+                "candidate_regime_files": candidate_files,
+                "overlap_files": overlap_files,
+                "best_overlap_days": round(best_overlap_days, 4)
+                if pd.notna(best_overlap_days)
+                else 0,
+                "alignment_status": "overlap_found"
+                if overlap_files > 0
+                else "no_overlap_found",
+                "audit_time_utc": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+    )
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    if not audit.empty:
-        audit = audit.sort_values(
-            by=["overlap_status", "overlap_days", "row_count"],
-            ascending=[True, False, False],
-        ).reset_index(drop=True)
+def build_report(
+    symbol: str,
+    micro_window: dict,
+    audit: pd.DataFrame,
+    summary: pd.DataFrame,
+) -> str:
+    lines = []
+    lines.append("=" * 90)
+    lines.append(f"BACQE TICK RESEARCH - MICROSTRUCTURE / REGIME ALIGNMENT AUDIT - {symbol}")
+    lines.append("=" * 90)
+    lines.append(f"Report time UTC: {datetime.now(timezone.utc).isoformat()}")
+    lines.append(f"Broker:          {BROKER}")
+    lines.append(f"Feature store:   {micro_window['micro_feature_path']}")
+    lines.append("-" * 90)
+    lines.append("")
+    lines.append("MICROSTRUCTURE WINDOW")
+    lines.append("-" * 90)
+    lines.append(summary.to_string(index=False))
+    lines.append("")
+    lines.append("TOP CANDIDATE REGIME FILES")
+    lines.append("-" * 90)
 
-    audit.to_csv(OUTPUT_CSV, index=False)
-    audit.to_parquet(OUTPUT_PARQUET, index=False)
-
-    print("-" * 90)
-    print("[DONE] Microstructure/regime alignment audit created.")
-    print(f"CSV:     {OUTPUT_CSV}")
-    print(f"Parquet: {OUTPUT_PARQUET}")
-    print("-" * 90)
-
-    if not audit.empty:
+    if audit.empty:
+        lines.append("No candidate files found.")
+    else:
         display_cols = [
             "file_name",
             "read_status",
@@ -285,10 +363,254 @@ def main() -> None:
 
         available_cols = [col for col in display_cols if col in audit.columns]
 
-        print(audit[available_cols].head(30).to_string(index=False))
-    else:
-        print("No audit rows created.")
+        lines.append(audit[available_cols].head(40).to_string(index=False))
 
+    lines.append("")
+    lines.append("INTERPRETATION NOTES")
+    lines.append("-" * 90)
+    lines.append("This script only audits alignment. It does not merge datasets.")
+    lines.append("Files with overlap_status='overlap' are candidates for Script 26 joins.")
+    lines.append("Prefer files with strong overlap, clear timestamp columns, and useful regime/state columns.")
+    lines.append("=" * 90)
+
+    return "\n".join(lines)
+
+
+def process_symbol(symbol: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    print("-" * 90)
+    print(f"[SYMBOL] {symbol}")
+
+    try:
+        micro_window = load_microstructure_window(symbol)
+    except FileNotFoundError as exc:
+        print(f"[WARN] {exc}")
+        return pd.DataFrame(), pd.DataFrame()
+
+    print(f"[INFO] Micro rows:    {micro_window['micro_rows']:,}")
+    print(f"[INFO] Micro columns: {micro_window['micro_columns']:,}")
+    print(f"[INFO] Micro start:   {micro_window['micro_start']}")
+    print(f"[INFO] Micro end:     {micro_window['micro_end']}")
+
+    candidates = find_candidate_regime_files(symbol)
+
+    print(f"[INFO] Candidate regime files found: {len(candidates):,}")
+
+    records = []
+
+    for i, file_path in enumerate(candidates, start=1):
+        print(f"[{i}/{len(candidates)}] Auditing: {file_path}")
+        records.append(
+            profile_candidate_file(
+                symbol=symbol,
+                file_path=file_path,
+                micro_window=micro_window,
+            )
+        )
+
+    audit = pd.DataFrame(records)
+
+    if not audit.empty:
+        audit = audit.sort_values(
+            by=["overlap_status", "overlap_days", "row_count"],
+            ascending=[True, False, False],
+        ).reset_index(drop=True)
+
+    summary = build_symbol_summary(symbol, micro_window, audit)
+
+    analysis_dir = OUTPUT_ANALYSIS_ROOT / f"symbol={symbol}"
+    report_dir = OUTPUT_REPORT_ROOT / f"symbol={symbol}"
+
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    audit_csv = analysis_dir / f"{symbol}_microstructure_regime_alignment_audit_latest.csv"
+    audit_parquet = analysis_dir / f"{symbol}_microstructure_regime_alignment_audit_latest.parquet"
+
+    summary_csv = analysis_dir / f"{symbol}_microstructure_regime_alignment_summary_latest.csv"
+    summary_parquet = analysis_dir / f"{symbol}_microstructure_regime_alignment_summary_latest.parquet"
+
+    report_path = report_dir / f"{symbol}_microstructure_regime_alignment_audit_report_latest.txt"
+
+    audit.to_csv(audit_csv, index=False)
+    audit.to_parquet(audit_parquet, index=False)
+
+    summary.to_csv(summary_csv, index=False)
+    summary.to_parquet(summary_parquet, index=False)
+
+    report = build_report(symbol, micro_window, audit, summary)
+    report_path.write_text(report, encoding="utf-8")
+
+    print(f"[DONE] {symbol}: audit CSV:   {audit_csv}")
+    print(f"[DONE] {symbol}: summary CSV: {summary_csv}")
+    print(f"[DONE] {symbol}: report:      {report_path}")
+
+    return audit, summary
+
+
+def save_master_outputs(
+    audit_frames: list[pd.DataFrame],
+    summary_frames: list[pd.DataFrame],
+) -> None:
+    master_analysis_dir = OUTPUT_ANALYSIS_ROOT / "_master"
+    master_report_dir = OUTPUT_REPORT_ROOT / "_master"
+
+    master_analysis_dir.mkdir(parents=True, exist_ok=True)
+    master_report_dir.mkdir(parents=True, exist_ok=True)
+
+    master_audit = (
+        pd.concat(audit_frames, ignore_index=True)
+        if audit_frames
+        else pd.DataFrame()
+    )
+
+    master_summary = (
+        pd.concat(summary_frames, ignore_index=True)
+        if summary_frames
+        else pd.DataFrame()
+    )
+
+    audit_csv = master_analysis_dir / "master_microstructure_regime_alignment_audit_latest.csv"
+    audit_parquet = master_analysis_dir / "master_microstructure_regime_alignment_audit_latest.parquet"
+
+    summary_csv = master_analysis_dir / "master_microstructure_regime_alignment_summary_latest.csv"
+    summary_parquet = master_analysis_dir / "master_microstructure_regime_alignment_summary_latest.parquet"
+
+    master_audit.to_csv(audit_csv, index=False)
+    master_audit.to_parquet(audit_parquet, index=False)
+
+    master_summary.to_csv(summary_csv, index=False)
+    master_summary.to_parquet(summary_parquet, index=False)
+
+    overlap_candidates = pd.DataFrame()
+
+    if not master_audit.empty:
+        overlap_candidates = master_audit[
+            master_audit["overlap_status"] == "overlap"
+        ].copy()
+
+        if not overlap_candidates.empty:
+            overlap_candidates = overlap_candidates.sort_values(
+                ["symbol", "overlap_days", "row_count"],
+                ascending=[True, False, False],
+            ).reset_index(drop=True)
+
+    overlap_csv = master_analysis_dir / "master_overlap_regime_candidates_latest.csv"
+    overlap_candidates.to_csv(overlap_csv, index=False)
+
+    report_path = master_report_dir / "master_microstructure_regime_alignment_audit_report_latest.txt"
+
+    report_path.write_text(
+        "\n".join(
+            [
+                "=" * 90,
+                "BACQE TICK RESEARCH - MASTER MICROSTRUCTURE / REGIME ALIGNMENT AUDIT",
+                "=" * 90,
+                f"Report time UTC: {datetime.now(timezone.utc).isoformat()}",
+                "-" * 90,
+                "",
+                "SYMBOL ALIGNMENT SUMMARY",
+                "-" * 90,
+                master_summary.to_string(index=False)
+                if not master_summary.empty
+                else "No summary rows generated.",
+                "",
+                "TOP OVERLAP CANDIDATES",
+                "-" * 90,
+                overlap_candidates[
+                    [
+                        "symbol",
+                        "file_name",
+                        "row_count",
+                        "chosen_timestamp_column",
+                        "regime_start",
+                        "regime_end",
+                        "overlap_days",
+                        "timeframes_detected",
+                        "regime_columns_detected",
+                        "file_path",
+                    ]
+                ]
+                .head(50)
+                .to_string(index=False)
+                if not overlap_candidates.empty
+                else "No overlap candidates found.",
+                "",
+                "INTERPRETATION NOTES",
+                "-" * 90,
+                "This script only audits alignment. It does not merge datasets.",
+                "Use master_overlap_regime_candidates_latest.csv to guide Script 26.",
+                "Script 26 should choose the safest overlapping regime source per symbol.",
+                "=" * 90,
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    print("-" * 90)
+    print("[DONE] Master microstructure/regime alignment audit created.")
+    print(f"Master audit CSV:   {audit_csv}")
+    print(f"Master summary CSV: {summary_csv}")
+    print(f"Overlap candidates: {overlap_csv}")
+    print(f"Master report:      {report_path}")
+
+    if not master_summary.empty:
+        print("-" * 90)
+        print("SYMBOL ALIGNMENT SUMMARY")
+        print(master_summary.to_string(index=False))
+
+    if not overlap_candidates.empty:
+        print("-" * 90)
+        print("TOP OVERLAP CANDIDATES")
+        display_cols = [
+            "symbol",
+            "file_name",
+            "row_count",
+            "chosen_timestamp_column",
+            "regime_start",
+            "regime_end",
+            "overlap_days",
+            "timeframes_detected",
+            "regime_columns_detected",
+        ]
+        available_cols = [col for col in display_cols if col in overlap_candidates.columns]
+        print(overlap_candidates[available_cols].head(30).to_string(index=False))
+
+
+def main() -> None:
+    print("=" * 90)
+    print("BACQE TICK RESEARCH - 25 AUDIT MICROSTRUCTURE / REGIME ALIGNMENT - MULTI SYMBOL")
+    print("=" * 90)
+    print(f"Broker:             {BROKER}")
+    print(f"Micro feature root: {MICRO_FEATURE_ROOT}")
+    print(f"Output analysis:    {OUTPUT_ANALYSIS_ROOT}")
+    print(f"Output reports:     {OUTPUT_REPORT_ROOT}")
+    print(f"Symbols:            {SYMBOLS}")
+    print("-" * 90)
+
+    audit_frames = []
+    summary_frames = []
+
+    for symbol in SYMBOLS:
+        audit, summary = process_symbol(symbol)
+
+        if not audit.empty:
+            audit_frames.append(audit)
+
+        if not summary.empty:
+            summary_frames.append(summary)
+
+    if not summary_frames:
+        print("[WARN] No alignment summaries created.")
+        return
+
+    save_master_outputs(
+        audit_frames=audit_frames,
+        summary_frames=summary_frames,
+    )
+
+    print("-" * 90)
+    print("[COMPLETE] Multi-symbol microstructure/regime alignment audit complete.")
+    print(f"Symbols analysed: {len(summary_frames)}")
     print("=" * 90)
 
 
