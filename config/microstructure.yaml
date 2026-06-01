@@ -1,0 +1,45 @@
+microstructure:
+  enabled: true
+
+  data_lake_root: "E:/Quant_Lab"
+
+  input:
+    tick_data_dir: "E:/Quant_Lab/data/raw/ticks"
+
+  output:
+    microstructure_dir: "E:/Quant_Lab/data/processed/microstructure"
+
+  symbols:
+    - GBPUSD
+    - EURUSD
+    - USDJPY
+    - EURGBP
+    - GBPJPY
+    - XAUUSD
+
+  tick_bars:
+    enabled: true
+    sizes:
+      - 100
+      - 250
+      - 1000
+
+  volume_bars:
+    enabled: true
+    use_proxy_volume: true
+    thresholds:
+      - 100
+      - 250
+      - 500
+      - 1000
+
+  imbalance_bars:
+    enabled: true
+    tick_imbalance_thresholds:
+      - 25
+      - 50
+      - 100
+
+  validation:
+    min_rows: 100
+    allow_proxy_volume: true
