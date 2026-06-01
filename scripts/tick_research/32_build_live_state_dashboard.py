@@ -25,7 +25,9 @@ INPUT_PATH = (
     / "data"
     / "analysis"
     / "tick_research"
-    / "current_microstructure_state_score_latest.csv"
+    / "current_state"
+    / "_master"
+    / "master_current_microstructure_state_score_latest.csv"
 )
 
 OUTPUT_REPORT_DIR = (
@@ -48,63 +50,69 @@ def load_current_state() -> pd.DataFrame:
     return df
 
 
-def select_primary_state(df: pd.DataFrame) -> pd.Series:
+def select_primary_states(df: pd.DataFrame) -> pd.DataFrame:
     priority = {
-        "compact_multi_layer_state": 1,
-        "trend_micro_state": 2,
-        "vol_micro_state": 3,
-        "microstructure_regime": 4,
-        "m15_composite_regime": 5,
+        "microstructure_regime": 1,
+        "compact_multi_layer_state": 2,
+        "trend_micro_state": 3,
+        "vol_micro_state": 4,
+        "momentum_micro_state": 5,
+        "trend_strength_micro_state": 6,
+        "multi_layer_state": 7,
     }
 
     data = df.copy()
     data["priority"] = data["state_column"].map(priority).fillna(999)
 
-    data = data.sort_values(
-        ["actionability", "forecast_quality", "priority"],
-        ascending=[True, True, True],
-    )
+    watchlist_rank = {
+        "research_watchlist_high_confidence": 1,
+        "research_watchlist": 2,
+        "diagnostic_only": 3,
+        "ignore_unknown_state": 4,
+        "too_early": 5,
+    }
 
-    return data.iloc[0]
+    data["actionability_rank"] = data["actionability"].map(watchlist_rank).fillna(999)
+
+    return (
+        data.sort_values(
+            ["symbol", "actionability_rank", "priority"],
+            ascending=[True, True, True],
+        )
+        .groupby("symbol", as_index=False)
+        .head(1)
+        .reset_index(drop=True)
+    )
 
 
 def build_dashboard_payload(df: pd.DataFrame) -> dict:
-    primary = select_primary_state(df)
+    primary_states = select_primary_states(df)
 
-    first = df.iloc[0]
+    watchlist = df[df["actionability"].isin(["research_watchlist", "research_watchlist_high_confidence", ])].copy()
+
+    actionability_rank = {"research_watchlist_high_confidence": 1, "research_watchlist": 2, }
+
+    forecast_quality_rank = {"high_confidence": 1, "stronger": 2, "usable": 3, "weak": 4, "low_sample": 5, }
+
+    watchlist["actionability_rank"] = (watchlist["actionability"].map(actionability_rank).fillna(999))
+
+    watchlist["forecast_quality_rank"] = (watchlist["forecast_quality"].map(forecast_quality_rank).fillna(999))
+
+    watchlist["abs_persistence_edge"] = (pd.to_numeric(watchlist["expected_persistence_edge"], errors="coerce", ).abs())
+
+    if not watchlist.empty:
+        watchlist = watchlist.sort_values(["actionability_rank", "forecast_quality_rank", "abs_persistence_edge",
+            "most_likely_transition_probability", ], ascending=[True, True, False, False], ).drop(
+            columns=["actionability_rank", "forecast_quality_rank", "abs_persistence_edge", ], errors="ignore", )
 
     dashboard = {
         "dashboard_time_utc": datetime.now(timezone.utc).isoformat(),
         "source_file": str(INPUT_PATH),
-        "symbol": first.get("symbol"),
-        "latest_bar_start_time": str(first.get("latest_bar_start_time")),
-        "latest_bar_end_time": str(first.get("latest_bar_end_time")),
-        "bar_type": first.get("bar_type"),
-        "bar_family": first.get("bar_family"),
-        "microstructure_regime": first.get("microstructure_regime"),
-        "m15_composite_regime": first.get("m15_composite_regime"),
-        "m15_trend_state": first.get("m15_trend_state"),
-        "m15_volatility_state": first.get("m15_volatility_state"),
-        "m15_momentum_state": first.get("m15_momentum_state"),
-        "latest_return": first.get("latest_return"),
-        "latest_abs_return": first.get("latest_abs_return"),
-        "latest_duration_seconds": first.get("latest_duration_seconds"),
-        "latest_tick_count": first.get("latest_tick_count"),
-        "latest_ticks_per_second": first.get("latest_ticks_per_second"),
-        "latest_m15_regime_confidence": first.get("latest_m15_regime_confidence"),
-        "primary_state_column": primary.get("state_column"),
-        "primary_current_state": primary.get("current_state"),
-        "primary_expected_next_state": primary.get("most_likely_next_state"),
-        "primary_transition_probability": primary.get("most_likely_transition_probability"),
-        "primary_self_transition_probability": primary.get("self_transition_probability"),
-        "primary_state_stability_label": primary.get("state_stability_label"),
-        "primary_expected_persist_pct": primary.get("expected_persist_pct"),
-        "primary_expected_flip_pct": primary.get("expected_flip_pct"),
-        "primary_expected_persistence_edge": primary.get("expected_persistence_edge"),
-        "primary_expected_behaviour_label": primary.get("expected_behaviour_label"),
-        "primary_forecast_quality": primary.get("forecast_quality"),
-        "primary_live_bias": primary.get("live_bias"),
-        "primary_actionability": primary.get("actionability"),
+        "symbols": sorted(df["symbol"].dropna().astype(str).unique().tolist()),
+        "symbol_count": int(df["symbol"].nunique()),
+        "row_count": len(df),
+        "primary_states": primary_states.to_dict(orient="records"),
+        "watchlist_states": watchlist.to_dict(orient="records"),
         "all_state_scores": df.to_dict(orient="records"),
     }
 
@@ -128,60 +136,73 @@ def format_num(value, digits: int = 6) -> str:
 def build_text_dashboard(payload: dict) -> str:
     lines = []
 
+    symbols = payload.get("symbols", [])
+    symbol_count = payload.get("symbol_count", len(symbols))
+    primary_states = payload.get("primary_states", [])
+    watchlist_states = payload.get("watchlist_states", [])
+    all_state_scores = payload.get("all_state_scores", [])
+
     lines.append("=" * 100)
     lines.append("BACQE LIVE MICROSTRUCTURE STATE DASHBOARD")
     lines.append("=" * 100)
     lines.append(f"Dashboard time UTC:     {payload.get('dashboard_time_utc')}")
-    lines.append(f"Symbol:                 {payload.get('symbol')}")
-    lines.append(f"Latest bar start:       {payload.get('latest_bar_start_time')}")
-    lines.append(f"Latest bar end:         {payload.get('latest_bar_end_time')}")
+    lines.append(f"Symbols monitored:      {symbol_count}")
+    lines.append(f"Symbols:                {', '.join(symbols)}")
+    lines.append(f"Total state scores:     {payload.get('row_count')}")
     lines.append("-" * 100)
 
     lines.append("")
-    lines.append("CURRENT MARKET STATE")
+    lines.append("PRIMARY STATE BY SYMBOL")
     lines.append("-" * 100)
-    lines.append(f"Bar type:               {payload.get('bar_type')}")
-    lines.append(f"Bar family:             {payload.get('bar_family')}")
-    lines.append(f"Microstructure regime:  {payload.get('microstructure_regime')}")
-    lines.append(f"M15 composite regime:   {payload.get('m15_composite_regime')}")
-    lines.append(f"M15 trend state:        {payload.get('m15_trend_state')}")
-    lines.append(f"M15 volatility state:   {payload.get('m15_volatility_state')}")
-    lines.append(f"M15 momentum state:     {payload.get('m15_momentum_state')}")
-    lines.append(f"M15 confidence:         {format_num(payload.get('latest_m15_regime_confidence'), 4)}")
+
+    if not primary_states:
+        lines.append("No primary states available.")
+    else:
+        for row in primary_states:
+            lines.append(
+                f"{row.get('symbol')} | "
+                f"bar={row.get('bar_type')} | "
+                f"lens={row.get('state_column')} | "
+                f"state={row.get('current_state')} | "
+                f"next={row.get('most_likely_next_state')} | "
+                f"transition={format_pct(float(row.get('most_likely_transition_probability', 0)) * 100)} | "
+                f"edge={format_num(row.get('expected_persistence_edge'), 4)} | "
+                f"quality={row.get('forecast_quality')} | "
+                f"bias={row.get('live_bias')} | "
+                f"action={row.get('actionability')}"
+            )
 
     lines.append("")
-    lines.append("LATEST BAR METRICS")
+    lines.append("RESEARCH WATCHLIST STATES")
     lines.append("-" * 100)
-    lines.append(f"Latest return:          {format_num(payload.get('latest_return'), 8)}")
-    lines.append(f"Latest absolute return: {format_num(payload.get('latest_abs_return'), 8)}")
-    lines.append(f"Duration seconds:       {format_num(payload.get('latest_duration_seconds'), 2)}")
-    lines.append(f"Tick count:             {format_num(payload.get('latest_tick_count'), 2)}")
-    lines.append(f"Ticks per second:       {format_num(payload.get('latest_ticks_per_second'), 6)}")
 
-    lines.append("")
-    lines.append("PRIMARY STATE FORECAST")
-    lines.append("-" * 100)
-    lines.append(f"State lens:             {payload.get('primary_state_column')}")
-    lines.append(f"Current state:          {payload.get('primary_current_state')}")
-    lines.append(f"Expected next state:    {payload.get('primary_expected_next_state')}")
-    lines.append(f"Transition probability: {format_pct(float(payload.get('primary_transition_probability', 0)) * 100)}")
-    lines.append(f"Self-transition prob:   {format_pct(float(payload.get('primary_self_transition_probability', 0)) * 100)}")
-    lines.append(f"State stability:        {payload.get('primary_state_stability_label')}")
-    lines.append(f"Expected persist pct:   {format_pct(payload.get('primary_expected_persist_pct'))}")
-    lines.append(f"Expected flip pct:      {format_pct(payload.get('primary_expected_flip_pct'))}")
-    lines.append(f"Persistence edge:       {format_num(payload.get('primary_expected_persistence_edge'), 4)}")
-    lines.append(f"Expected behaviour:     {payload.get('primary_expected_behaviour_label')}")
-    lines.append(f"Forecast quality:       {payload.get('primary_forecast_quality')}")
-    lines.append(f"Live bias:              {payload.get('primary_live_bias')}")
-    lines.append(f"Actionability:          {payload.get('primary_actionability')}")
+    if not watchlist_states:
+        lines.append("No current states met research watchlist criteria.")
+    else:
+        for row in watchlist_states:
+            lines.append(
+                f"{row.get('symbol')} | "
+                f"bar={row.get('bar_type')} | "
+                f"lens={row.get('state_column')} | "
+                f"state={row.get('current_state')} | "
+                f"next={row.get('most_likely_next_state')} | "
+                f"transition={format_pct(float(row.get('most_likely_transition_probability', 0)) * 100)} | "
+                f"self={format_pct(float(row.get('self_transition_probability', 0)) * 100)} | "
+                f"edge={format_num(row.get('expected_persistence_edge'), 4)} | "
+                f"quality={row.get('forecast_quality')} | "
+                f"bias={row.get('live_bias')} | "
+                f"action={row.get('actionability')}"
+            )
 
     lines.append("")
     lines.append("ALL STATE LENSES")
     lines.append("-" * 100)
 
-    for row in payload.get("all_state_scores", []):
+    for row in all_state_scores:
         lines.append(
+            f"{row.get('symbol')} | "
             f"{row.get('state_column')} | "
+            f"bar={row.get('bar_type')} | "
             f"state={row.get('current_state')} | "
             f"next={row.get('most_likely_next_state')} | "
             f"transition={format_pct(float(row.get('most_likely_transition_probability', 0)) * 100)} | "
@@ -196,7 +217,7 @@ def build_text_dashboard(payload: dict) -> str:
     lines.append("-" * 100)
     lines.append("This dashboard is a research intelligence surface, not a trading instruction.")
     lines.append("research_watchlist means the state is statistically interesting enough to monitor.")
-    lines.append("diagnostic_only means useful context, but not enough evidence for signal research yet.")
+    lines.append("ignore_unknown_state means the state was retained for diagnostics but should not be treated as actionable.")
     lines.append("The dashboard becomes more valuable as the tick dataset grows.")
     lines.append("=" * 100)
 
