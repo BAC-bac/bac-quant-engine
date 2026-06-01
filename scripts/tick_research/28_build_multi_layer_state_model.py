@@ -129,27 +129,63 @@ def prepare_data(df: pd.DataFrame, symbol: str) -> tuple[pd.DataFrame, str, dict
         data["abs_imbalance_ratio"] = data["imbalance_ratio"].abs()
 
     if "ticks_per_second" in data.columns:
-        data["ticks_per_second"] = data["ticks_per_second"].replace([np.inf, -np.inf], np.nan)
+        data["ticks_per_second"] = data["ticks_per_second"].replace(
+            [np.inf, -np.inf],
+            np.nan,
+        )
 
+    # Convert only regime label columns to strings.
+    # Do NOT convert regime confidence to string because it is numeric.
     for key, col in regime_cols.items():
-        if key == "time":
+        if key in ["time", "confidence"]:
             continue
+
         if col not in data.columns:
             data[col] = "unknown"
+
+        data[col] = data[col].fillna("unknown").astype(str)
+
+    confidence_col = regime_cols["confidence"]
+
+    if confidence_col in data.columns:
+        data[confidence_col] = pd.to_numeric(
+            data[confidence_col],
+            errors="coerce",
+        )
 
     if "microstructure_regime" not in data.columns:
         data["microstructure_regime"] = "unknown_microstructure_regime"
 
+    data["microstructure_regime"] = (
+        data["microstructure_regime"]
+        .fillna("unknown_microstructure_regime")
+        .astype(str)
+    )
+
     if "bar_type" not in data.columns:
         data["bar_type"] = "unknown_bar_type"
+
+    data["bar_type"] = data["bar_type"].fillna("unknown_bar_type").astype(str)
 
     if "bar_family" not in data.columns:
         data["bar_family"] = "unknown_bar_family"
 
+    data["bar_family"] = data["bar_family"].fillna("unknown_bar_family").astype(str)
+
     if "has_selected_regime" not in data.columns:
         data["has_selected_regime"] = False
 
-    data["has_selected_regime"] = data["has_selected_regime"].fillna(False).astype(bool)
+    data["has_selected_regime"] = (
+        data["has_selected_regime"]
+        .fillna(False)
+        .astype(bool)
+    )
+
+    data["regime_join_status"] = np.where(
+        data["has_selected_regime"],
+        "matched",
+        "unmatched",
+    )
 
     return data, timeframe, regime_cols
 
