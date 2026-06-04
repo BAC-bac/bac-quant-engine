@@ -342,6 +342,85 @@ def build_filter_summary(filtered_trades_df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def build_filter_audit(filtered_trades_df: pd.DataFrame) -> pd.DataFrame:
+    audit_cols = [
+        "filter_name",
+        "cost_per_trade",
+        "symbol",
+        "bar_type",
+        "parameter",
+        "spread_feature",
+        "target",
+        "threshold_pair",
+        "trade_number",
+        "end_time",
+        "end_time_london",
+        "weekday",
+        "session",
+        "liquidity_regime",
+        "signal_direction",
+        "forward_return",
+        "gross_signed_return",
+        "net_signed_return",
+        "net_win_flag",
+        "dataset_file",
+    ]
+
+    available_cols = [c for c in audit_cols if c in filtered_trades_df.columns]
+    audit_df = filtered_trades_df[available_cols].copy()
+
+    duplicate_key_cols = [
+        "filter_name",
+        "cost_per_trade",
+        "symbol",
+        "bar_type",
+        "parameter",
+        "spread_feature",
+        "target",
+        "threshold_pair",
+        "trade_number",
+        "end_time",
+    ]
+
+    available_key_cols = [c for c in duplicate_key_cols if c in audit_df.columns]
+
+    audit_df["duplicate_trade_key"] = audit_df.duplicated(
+        subset=available_key_cols,
+        keep=False,
+    )
+
+    audit_df["return_direction_check"] = np.where(
+        audit_df["signal_direction"] != 0,
+        audit_df["gross_signed_return"] == audit_df["forward_return"] * audit_df["signal_direction"],
+        False,
+    )
+
+    audit_df["audit_warning"] = ""
+
+    audit_df.loc[audit_df["duplicate_trade_key"], "audit_warning"] += "duplicate_trade_key;"
+    audit_df.loc[~audit_df["return_direction_check"], "audit_warning"] += "return_direction_mismatch;"
+
+    audit_df = audit_df.sort_values(
+        [
+            "filter_name",
+            "cost_per_trade",
+            "symbol",
+            "parameter",
+            "spread_feature",
+            "target",
+            "threshold_pair",
+            "end_time_london",
+            "trade_number",
+        ],
+        ascending=True,
+        na_position="last",
+    ).reset_index(drop=True)
+
+    audit_df["audit_row"] = audit_df.index + 1
+
+    return audit_df
+
+
 def main() -> None:
     print_header("BACQE MICROSTRUCTURE 43 - SIGNAL FILTER OPTIMIZER")
 
@@ -388,14 +467,17 @@ def main() -> None:
         raise RuntimeError("No trades survived the filter optimizer.")
 
     summary_df = build_filter_summary(filtered_trades_df)
+    audit_df = build_filter_audit(filtered_trades_df)
 
     trades_csv = report_dir / "microstructure_signal_filter_optimizer_trades_latest.csv"
     summary_csv = report_dir / "microstructure_signal_filter_optimizer_summary_latest.csv"
     json_path = report_dir / "microstructure_signal_filter_optimizer_latest.json"
     txt_path = report_dir / "microstructure_signal_filter_optimizer_latest.txt"
+    audit_csv = report_dir / "microstructure_signal_filter_optimizer_audit_latest.csv"
 
     filtered_trades_df.to_csv(trades_csv, index=False)
     summary_df.to_csv(summary_csv, index=False)
+    audit_df.to_csv(audit_csv, index=False)
 
     label_counts = summary_df["filter_label"].value_counts(dropna=False).to_dict()
 
@@ -446,6 +528,10 @@ def main() -> None:
     lines.append(f"Prepared rows:  {len(prepared_df):,}")
     lines.append(f"Filtered rows:  {len(filtered_trades_df):,}")
     lines.append(f"Summary rows:   {len(summary_df):,}")
+    lines.append(f"Audit rows:    {len(audit_df):,}")
+    lines.append(f"Audit warnings: {audit_df['audit_warning'].value_counts(dropna=False).to_dict()}")
+    lines.append(f"Duplicate trade rows: {int(audit_df['duplicate_trade_key'].sum()):,}")
+    lines.append(f"Return direction mismatch rows: {int((~audit_df['return_direction_check']).sum()):,}")
     lines.append("")
     lines.append(f"Filter labels: {label_counts}")
     lines.append("")
@@ -465,6 +551,10 @@ def main() -> None:
     print(f"Prepared rows: {len(prepared_df):,}")
     print(f"Filtered rows: {len(filtered_trades_df):,}")
     print(f"Summary rows:  {len(summary_df):,}")
+    print(f"Audit CSV:     {audit_csv}")
+    print(f"Audit warnings:{audit_df['audit_warning'].value_counts(dropna=False).to_dict()}")
+    print(f"Duplicates:    {int(audit_df['duplicate_trade_key'].sum()):,}")
+    print(f"Return mismatches: {int((~audit_df['return_direction_check']).sum()):,}")
     print(f"Labels:        {label_counts}")
     print(f"Trades CSV:    {trades_csv}")
     print(f"Summary CSV:   {summary_csv}")
