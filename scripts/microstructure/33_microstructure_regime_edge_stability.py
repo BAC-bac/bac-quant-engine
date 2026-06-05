@@ -30,6 +30,22 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = PROJECT_ROOT / "config" / "microstructure.yaml"
 
 
+def safe_read_csv(path: Path, label: str) -> pd.DataFrame:
+    if not path.exists():
+        print(f"[WARN] {label} file does not exist: {path}")
+        return pd.DataFrame()
+
+    if path.stat().st_size == 0:
+        print(f"[WARN] {label} file is empty: {path}")
+        return pd.DataFrame()
+
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        print(f"[WARN] {label} file has no columns/data: {path}")
+        return pd.DataFrame()
+
+
 def print_header(title: str) -> None:
     print("=" * 90)
     print(title)
@@ -321,8 +337,15 @@ def main() -> None:
             f"Missing liquidity transition summary: {transition_path}. Run script 32 first."
         )
 
-    regime_summary_df = pd.read_csv(regime_summary_path)
-    transition_df = pd.read_csv(transition_path)
+    regime_summary_df = safe_read_csv(regime_summary_path, "Regime summary")
+    transition_df = safe_read_csv(transition_path, "Transition summary")
+
+    if regime_summary_df.empty:
+        print("[STOP] Regime summary is empty. Nothing to analyse for regime edge stability.")
+        return
+
+    if transition_df.empty:
+        print("[WARN] Transition summary is empty. Continuing with regime summary only.")
 
     edge_stability_df = build_edge_stability(regime_summary_df)
     regime_level_df = build_regime_level_stability(regime_summary_df)

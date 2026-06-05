@@ -28,10 +28,30 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = PROJECT_ROOT / "config" / "microstructure.yaml"
 
 SPREAD_FEATURES = [
+    # Native / previously expected spread features
+    "avg_spread",
+    "avg_spread_mean_3",
     "avg_spread_mean_5",
     "avg_spread_mean_10",
+    "avg_spread_mean_20",
     "avg_spread_zscore_10",
     "avg_spread_zscore_20",
+
+    # Derived spread features added by this script when bid/ask columns exist
+    "open_spread",
+    "high_spread",
+    "low_spread",
+    "close_spread",
+    "spread_mean",
+    "spread_max",
+    "spread_min",
+    "spread_range",
+    "spread_pct_of_mid",
+    "spread_mean_3",
+    "spread_mean_5",
+    "spread_mean_10",
+    "spread_zscore_10",
+    "spread_zscore_20",
 ]
 
 TARGET_COLUMNS = [
@@ -87,6 +107,105 @@ def parse_dataset_metadata(file_path: Path) -> dict:
             metadata["parameter"] = part.replace("parameter=", "")
 
     return metadata
+
+
+def add_derived_spread_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add spread features when research datasets contain bid/ask OHLC columns
+    but do not yet contain explicit spread columns.
+
+    The current research datasets include columns such as:
+        open_ask/open_bid, high_ask/high_bid, low_ask/low_bid, close_ask/close_bid
+
+    Script 32 originally expected pre-built spread features only, which caused every
+    dataset to be marked as 'no_spread_features'. This function bridges that gap.
+    """
+    df = df.copy()
+
+    spread_pairs = {
+        "open_spread": ("open_ask", "open_bid"),
+        "high_spread": ("high_ask", "high_bid"),
+        "low_spread": ("low_ask", "low_bid"),
+        "close_spread": ("close_ask", "close_bid"),
+    }
+
+    for spread_col, (ask_col, bid_col) in spread_pairs.items():
+        if spread_col not in df.columns and {ask_col, bid_col}.issubset(df.columns):
+            ask = pd.to_numeric(df[ask_col], errors="coerce")
+            bid = pd.to_numeric(df[bid_col], errors="coerce")
+            df[spread_col] = ask - bid
+
+    base_spread_cols = [
+        col for col in ["open_spread", "high_spread", "low_spread", "close_spread"]
+        if col in df.columns
+    ]
+
+    if base_spread_cols:
+        df["spread_mean"] = df[base_spread_cols].mean(axis=1)
+        df["spread_max"] = df[base_spread_cols].max(axis=1)
+        df["spread_min"] = df[base_spread_cols].min(axis=1)
+        df["spread_range"] = df["spread_max"] - df["spread_min"]
+
+        if "close_mid" in df.columns:
+            close_mid = pd.to_numeric(df["close_mid"], errors="coerce").replace(0, np.nan)
+            df["spread_pct_of_mid"] = df["spread_mean"] / close_mid
+
+        # Rolling features make the liquidity-state logic more stable than using
+        # one bar's spread in isolation.
+        for window in [3, 5, 10]:
+            df[f"spread_mean_{window}"] = df["spread_mean"].rolling(window=window, min_periods=1).mean()
+
+        for window in [10, 20]:
+            rolling_mean = df["spread_mean"].rolling(window=window, min_periods=3).mean()
+            rolling_std = df["spread_mean"].rolling(window=window, min_periods=3).std()
+            df[f"spread_zscore_{window}"] = (
+                (df["spread_mean"] - rolling_mean) / rolling_std.replace(0, np.nan)
+            )
+
+    return df
+
+
+def empty_summary_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=[
+        "symbol",
+        "bar_type",
+        "spread_feature",
+        "target",
+        "liquidity_regime",
+        "datasets",
+        "total_rows",
+        "avg_rows",
+        "avg_target_mean",
+        "avg_positive_return_rate",
+        "avg_spread_value",
+        "avg_abs_correlation",
+        "max_abs_correlation",
+        "avg_correlation_sample_size",
+        "regime_score",
+        "summary_rank",
+        "created_at_utc",
+    ])
+
+
+def empty_transition_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=[
+        "symbol",
+        "bar_type",
+        "parameter",
+        "spread_feature",
+        "target",
+        "tight_liquidity",
+        "normal_liquidity",
+        "wide_liquidity",
+        "extreme_wide_liquidity",
+        "tight_to_extreme_delta",
+        "normal_to_wide_delta",
+        "absolute_tight_to_extreme_delta",
+        "absolute_normal_to_wide_delta",
+        "transition_score",
+        "transition_rank",
+        "created_at_utc",
+    ])
 
 
 def assign_liquidity_regimes(df: pd.DataFrame, spread_col: str) -> pd.Series:
@@ -195,6 +314,7 @@ def analyse_dataset(file_path: Path) -> list[dict]:
 
     try:
         df = pd.read_parquet(file_path)
+        df = add_derived_spread_features(df)
     except Exception as exc:
         return [{
             "checked_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -239,7 +359,7 @@ def analyse_dataset(file_path: Path) -> list[dict]:
             "liquidity_regime": None,
             "row_count": len(df),
             "status": "no_spread_features",
-            "error": "No spread features available.",
+            "error": "No native or derived spread features available. Expected explicit spread fields or bid/ask OHLC columns.",
         }]
 
     for spread_col in available_spread_features:
@@ -265,7 +385,7 @@ def build_regime_summary(results_df: pd.DataFrame) -> pd.DataFrame:
     ok_df = results_df[results_df["status"] == "ok"].copy()
 
     if ok_df.empty:
-        return pd.DataFrame()
+        return empty_summary_frame()
 
     grouped = (
         ok_df
@@ -310,7 +430,7 @@ def build_liquidity_transition_summary(results_df: pd.DataFrame) -> pd.DataFrame
     ok_df = results_df[results_df["status"] == "ok"].copy()
 
     if ok_df.empty:
-        return pd.DataFrame()
+        return empty_transition_frame()
 
     pivot = (
         ok_df
