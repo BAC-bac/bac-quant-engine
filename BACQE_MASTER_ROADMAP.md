@@ -295,3 +295,16 @@ Next Target:
   - forensic pass
 - Main research warning:
   - Several Asia-session candidates remain promising but have `few_unique_dates` and `single_session` risk flags.
+
+  ## 2026-06-07 - Candidate Validation Tightened
+
+- Updated Script 47 to investigate candidates with fewer than 5 unique dates.
+- Re-ran candidate validation review.
+- Primary validation passes reduced from 9 to 5.
+- 10 candidates downgraded to `investigate_insufficient_date_coverage`.
+- This prevents high trade counts from masking poor date coverage.
+- Current strongest remaining candidate group:
+  - `eurusd_exclude_bad_days`
+  - 5 primary validation-pass rows
+  - clean risk flags
+  - forensic pass
