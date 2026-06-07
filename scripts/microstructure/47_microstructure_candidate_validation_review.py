@@ -79,6 +79,11 @@ def classify_validation(row: pd.Series) -> str:
     if hour_conc >= 0.80:
         return "investigate_hour_concentrated"
 
+    unique_dates = row.get("unique_dates", np.nan)
+
+    if pd.notna(unique_dates) and unique_dates < 5:
+        return "investigate_insufficient_date_coverage"
+
     if profit_factor >= 20:
         return "investigate_too_good_to_trust"
 
@@ -160,7 +165,8 @@ def build_validation_summary(df: pd.DataFrame) -> pd.DataFrame:
         "validation_pass_primary": 1,
         "validation_pass_secondary": 2,
         "investigate_too_good_to_trust": 3,
-        "watchlist_only": 4,
+        "investigate_insufficient_date_coverage": 4,
+        "watchlist_only": 5,
         "investigate_hour_concentrated": 5,
         "investigate_missing_metrics": 6,
         "reject_concentration_risk": 7,
