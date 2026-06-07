@@ -40,6 +40,43 @@ REGIME_ORDER = [
 ]
 
 
+def add_derived_spread_features(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    if "close_spread" not in df.columns and {"close_ask", "close_bid"}.issubset(df.columns):
+        df["close_spread"] = df["close_ask"] - df["close_bid"]
+
+    if "open_spread" not in df.columns and {"open_ask", "open_bid"}.issubset(df.columns):
+        df["open_spread"] = df["open_ask"] - df["open_bid"]
+
+    if "high_spread" not in df.columns and {"high_ask", "high_bid"}.issubset(df.columns):
+        df["high_spread"] = df["high_ask"] - df["high_bid"]
+
+    if "low_spread" not in df.columns and {"low_ask", "low_bid"}.issubset(df.columns):
+        df["low_spread"] = df["low_ask"] - df["low_bid"]
+
+    spread_cols = [c for c in ["open_spread", "high_spread", "low_spread", "close_spread"] if c in df.columns]
+
+    if spread_cols:
+        df["spread_mean"] = df[spread_cols].mean(axis=1)
+        df["spread_max"] = df[spread_cols].max(axis=1)
+        df["spread_min"] = df[spread_cols].min(axis=1)
+        df["spread_range"] = df["spread_max"] - df["spread_min"]
+
+    if "spread_mean" in df.columns and "close_mid" in df.columns:
+        df["spread_pct_of_mid"] = df["spread_mean"] / df["close_mid"]
+
+    if "spread_mean" in df.columns:
+        for window in [3, 5, 10, 20]:
+            df[f"spread_mean_{window}"] = df["spread_mean"].rolling(window).mean()
+
+        for window in [10, 20]:
+            rolling_mean = df["spread_mean"].rolling(window).mean()
+            rolling_std = df["spread_mean"].rolling(window).std()
+            df[f"spread_zscore_{window}"] = (df["spread_mean"] - rolling_mean) / rolling_std.replace(0, np.nan)
+
+    return df
+
 def print_header(title: str) -> None:
     print("=" * 90)
     print(title)
@@ -270,6 +307,7 @@ def build_signal_for_candidate(row: pd.Series, research_dataset_root: Path) -> l
 
         try:
             df = pd.read_parquet(dataset_file)
+            df = add_derived_spread_features(df)
         except Exception as exc:
             record["status"] = "failed_read"
             record["error"] = str(exc)
