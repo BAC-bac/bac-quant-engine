@@ -225,3 +225,73 @@ Review Microstructure branch and fix missing spread feature issue.
 
 ```text
 Improve microstructure signal factory feature validation
+```
+
+# Build Log
+
+## 2026-06-07
+
+### Infrastructure
+
+- Created BACQE_MASTER_ROADMAP.md
+- Added branch status tracking
+- Added completion criteria for major BACQE branches
+
+### Sentinel
+
+- Ran Sentinel Summary
+- Overall status: WARNING
+- Critical checks: 0
+- Average health score: 86.69
+
+### Microstructure
+
+Issue identified:
+- Signal Factory failing due to missing derived spread features
+
+Actions taken:
+- Reviewed script 34 (microstructure_signal_factory.py)
+- Verified derived spread feature generation function
+- Confirmed function execution after dataset loading
+- Re-ran signal factory
+
+Results:
+- Signal candidates: 25
+- Signal results: 75
+- Status counts: {'ok': 75}
+- Missing spread feature issue resolved
+
+Live Candidate Monitor:
+- Registry rows: 28
+- Monitor rows: 18
+- Ledger rows: 36
+- Statuses: {'ok': 18}
+- OOS labels: {'oos_tracking_ok': 18}
+
+Outcome:
+- Microstructure branch remains stable
+- Candidate monitoring operational
+- OOS tracking operational
+
+Next Target:
+- Review candidate registry quality
+- Review strongest signal candidates
+- Continue OOS data collection
+
+## 2026-06-07 - Script 47 Candidate Validation Review
+
+- Added `47_microstructure_candidate_validation_review.py`.
+- Validated 28 candidate registry rows.
+- Validation labels:
+  - `validation_pass_primary`: 9
+  - `validation_pass_secondary`: 5
+  - `investigate_too_good_to_trust`: 1
+  - `reject_low_sample`: 3
+  - `reject_concentration_risk`: 10
+- Best current candidate group:
+  - `eurusd_exclude_bad_days`
+  - 594 trades
+  - clean risk flags
+  - forensic pass
+- Main research warning:
+  - Several Asia-session candidates remain promising but have `few_unique_dates` and `single_session` risk flags.
