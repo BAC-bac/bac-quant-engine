@@ -35,7 +35,7 @@ REPORT_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks" / "normalisation_report
 
 SYMBOL = "EURUSD"
 START_DATE = "2024-01-01"
-END_DATE = "2024-01-31"
+END_DATE = "2024-03-31"
 
 SOURCE = "dukascopy"
 
