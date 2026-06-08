@@ -23,8 +23,8 @@ TIB_ROOT = DATA_ROOT / "processed" / "dukascopy_tick_imbalance_bars"
 REPORT_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks" / "tick_imbalance_bar_reports"
 
 SYMBOL = "EURUSD"
-START_DATE = "2024-01-01"
-END_DATE = "2024-03-31"
+START_DATE = "2024-04-01"
+END_DATE = "2024-06-30"
 
 IMBALANCE_THRESHOLDS = [25, 50, 100]
 

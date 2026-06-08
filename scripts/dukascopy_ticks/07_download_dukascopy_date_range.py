@@ -21,8 +21,8 @@ RAW_ROOT = DATA_ROOT / "raw" / "dukascopy_ticks"
 REPORT_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks" / "download_reports"
 
 SYMBOL = "EURUSD"
-START_DATE = "2024-01-01"
-END_DATE = "2024-03-31"
+START_DATE = "2024-04-01"
+END_DATE = "2024-06-30"
 
 BASE_URL = "https://datafeed.dukascopy.com/datafeed"
 
