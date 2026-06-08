@@ -34,3 +34,11 @@ Research Goals:
 3. What file format is provided?
 4. Can downloads be automated?
 5. What storage footprint should be expected?
+
+
+Jan-Mar 2024 validation complete
+5.36M clean ticks
+91k fixed tick bars
+15.45k TIBs
+78 valid days
+13 closed/missing days
