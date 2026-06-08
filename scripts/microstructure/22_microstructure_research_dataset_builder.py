@@ -32,6 +32,21 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = PROJECT_ROOT / "config" / "microstructure.yaml"
 
+PROTECTED_SPREAD_FEATURES = [
+    "open_spread",
+    "high_spread",
+    "low_spread",
+    "close_spread",
+    "spread_mean",
+    "spread_min",
+    "spread_max",
+    "spread_range",
+    "spread_pct_of_mid",
+    "spread_mean_3",
+    "spread_mean_5",
+    "spread_mean_10",
+]
+
 TARGET_COLUMNS = [
     "forward_return_1",
     "forward_return_3",
@@ -135,7 +150,13 @@ def load_selected_features(shortlist_path: Path) -> list[str]:
         .tolist()
     )
 
-    return selected_features
+    all_features = selected_features.copy()
+
+    for feature in PROTECTED_SPREAD_FEATURES:
+        if feature not in all_features:
+            all_features.append(feature)
+
+    return all_features
 
 
 def clean_research_dataset(df: pd.DataFrame) -> pd.DataFrame:

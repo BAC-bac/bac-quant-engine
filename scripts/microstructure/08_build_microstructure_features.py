@@ -102,6 +102,46 @@ def add_base_features(df: pd.DataFrame, bar_type: str, parameter_name: str, para
     df["range_mid_abs"] = df["high_mid"] - df["low_mid"]
     df["range_mid_pct"] = df["range_mid_abs"] / df["close_mid"]
 
+    # ------------------------------------------------------------------
+    # Spread feature compatibility layer
+    # ------------------------------------------------------------------
+    # These columns are required by downstream microstructure scripts,
+    # especially Signal Factory and Signal Context Review.
+    # Some bar builders may already provide avg_spread / max_spread,
+    # while others provide bid/ask OHLC columns. We derive a consistent
+    # naming layer here.
+
+    if "open_ask" in df.columns and "open_bid" in df.columns:
+        df["open_spread"] = df["open_ask"] - df["open_bid"]
+
+    if "high_ask" in df.columns and "high_bid" in df.columns:
+        df["high_spread"] = df["high_ask"] - df["high_bid"]
+
+    if "low_ask" in df.columns and "low_bid" in df.columns:
+        df["low_spread"] = df["low_ask"] - df["low_bid"]
+
+    if "close_ask" in df.columns and "close_bid" in df.columns:
+        df["close_spread"] = df["close_ask"] - df["close_bid"]
+
+    spread_ohlc_cols = [
+        col for col in [
+            "open_spread",
+            "high_spread",
+            "low_spread",
+            "close_spread",
+        ]
+        if col in df.columns
+    ]
+
+    if spread_ohlc_cols:
+        df["spread_mean"] = df[spread_ohlc_cols].mean(axis=1)
+        df["spread_min"] = df[spread_ohlc_cols].min(axis=1)
+        df["spread_max"] = df[spread_ohlc_cols].max(axis=1)
+        df["spread_range"] = df["spread_max"] - df["spread_min"]
+
+    if "close_spread" in df.columns and "close_mid" in df.columns:
+        df["spread_pct_of_mid"] = df["close_spread"] / df["close_mid"].replace(0, np.nan)
+
     if "duration_seconds" in df.columns:
         df["duration_seconds"] = pd.to_numeric(df["duration_seconds"], errors="coerce")
         df["bars_per_hour"] = 3600 / df["duration_seconds"].replace(0, np.nan)
@@ -145,6 +185,20 @@ def add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
         if "avg_spread" in df.columns:
             df[f"avg_spread_mean_{window}"] = df["avg_spread"].rolling(window, min_periods=max(2, window // 2)).mean()
             df[f"avg_spread_zscore_{window}"] = safe_zscore(df["avg_spread"], window)
+
+        if "close_spread" in df.columns:
+            df[f"spread_mean_{window}"] = df["close_spread"].rolling(
+                window,
+                min_periods=max(2, window // 2),
+            ).mean()
+
+            df[f"spread_zscore_{window}"] = safe_zscore(df["close_spread"], window)
+
+        if "spread_range" in df.columns:
+            df[f"spread_range_mean_{window}"] = df["spread_range"].rolling(
+                window,
+                min_periods=max(2, window // 2),
+            ).mean()
 
         if "tick_count" in df.columns:
             df[f"tick_count_mean_{window}"] = df["tick_count"].rolling(window, min_periods=max(2, window // 2)).mean()
