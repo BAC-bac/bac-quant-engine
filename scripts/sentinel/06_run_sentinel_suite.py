@@ -18,6 +18,7 @@ SENTINEL_SCRIPTS = [
     "scripts/sentinel/03_check_regime_classification_health.py",
     "scripts/sentinel/04_check_regime_forecast_health.py",
     "scripts/sentinel/05_generate_sentinel_summary.py",
+    "scripts/sentinel/07_check_scheduler_automation_health.py",
 ]
 
 
