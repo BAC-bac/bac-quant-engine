@@ -35,6 +35,8 @@ OUTPUT_TXT = OUTPUT_DIR / "sentinel_summary_latest.txt"
 
 EXCLUDE_DIR_NAMES = {
     "sentinel_summary",
+    "sentinel_suite",
+    "data_lake_freshness",
 }
 
 
