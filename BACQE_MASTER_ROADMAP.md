@@ -308,3 +308,139 @@ Next Target:
   - 5 primary validation-pass rows
   - clean risk flags
   - forensic pass
+
+## Sentinel Enhancement Project (Completed June 2026)
+
+### Objective
+
+Improve operational robustness across BACQE by implementing automated health monitoring, data freshness validation, scheduler monitoring, and end-to-end pipeline verification.
+
+### Motivation
+
+As BACQE has grown into a multi-project quantitative research platform spanning:
+
+* MT5 OHLCV market data collection
+* Tick capture and microstructure research
+* Regime classification and forecasting
+* Strategy routing
+* Greyhound racing analytics
+* RPG tips ingestion
+* Data Registry
+* Information Data pipelines
+
+it became increasingly difficult to manually verify that all systems were operating correctly.
+
+The goal was to move BACQE closer to professional quantitative research infrastructure by implementing automated monitoring and health validation.
+
+---
+
+### Completed Work
+
+#### Sentinel Suite Expansion
+
+Enhanced the Sentinel framework to include:
+
+1. Market Data Health Monitoring
+2. Feature Pipeline Health Monitoring
+3. Regime Classification Health Monitoring
+4. Regime Forecast Health Monitoring
+5. Sentinel Summary Reporting
+6. Full Sentinel Suite Orchestration
+7. Scheduler & Automation Health Monitoring
+
+---
+
+#### Data Lake Freshness Monitoring
+
+Developed a comprehensive Data Lake Freshness Audit capable of validating:
+
+* MT5 Tick Capture freshness
+* MT5 OHLCV data freshness
+* Processed dataset freshness
+* Analysis output freshness
+* Greyhound pipeline freshness
+* RPG tips freshness
+* Data Registry freshness
+* Sentinel output freshness
+
+The audit also identifies:
+
+* Expected stale datasets
+* Legacy project folders
+* Missing folders
+* Empty folders
+* Critical freshness failures
+
+---
+
+#### Scheduler & Automation Monitoring
+
+Implemented Scheduler Health Monitoring to validate:
+
+* Windows Task Scheduler execution
+* Last task result status
+* Missed task detection
+* Next scheduled execution
+* Automation availability
+
+The system successfully identified and monitored all BACQE scheduled tasks.
+
+---
+
+#### Operational Investigation Outcomes
+
+The Sentinel enhancement project successfully verified:
+
+* MT5 Tick Capture operational
+* Full FTMO OHLCV Universe operational
+* Greyhound Results Pipeline operational
+* RPG Tips Pipeline operational
+* Microstructure Pipeline operational
+* Data Registry operational
+* Sentinel reporting operational
+
+The investigation also identified:
+
+* Legacy greyhound project folders
+* Expected stale Information Data pipelines
+* Future requirement for unified Sentinel schema support
+
+---
+
+### Infrastructure Milestone
+
+This project marks a transition from:
+
+"Building research pipelines"
+
+to
+
+"Building monitored quantitative research infrastructure"
+
+BACQE can now automatically monitor its own operational health, detect stale datasets, validate automation processes, and provide early warning of potential system failures.
+
+This significantly reduces operational risk and improves confidence in all future research outputs.
+
+---
+
+### Future Improvements
+
+* BACQE-SENTINEL-001:
+  Refactor Sentinel Summary to support multiple Sentinel report schemas through a common reporting standard.
+
+* Add lock-file protection to Sentinel Suite runs to prevent overlapping executions.
+
+* Extend Scheduler Health Monitoring to Linux Cron environments.
+
+* Add notification and alerting capabilities for critical failures.
+
+* Integrate Sentinel Health metrics into a future BACQE Dashboard.
+
+BACQE-SENTINEL-001
+
+Refactor Sentinel 05 to support:
+- scheduler_automation_health
+- data_lake_freshness
+- future sentinel modules
+
+using a common sentinel schema
