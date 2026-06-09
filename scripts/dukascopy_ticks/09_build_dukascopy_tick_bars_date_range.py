@@ -32,8 +32,8 @@ BAR_ROOT = DATA_ROOT / "processed" / "dukascopy_tick_bars"
 REPORT_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks" / "tick_bar_reports"
 
 SYMBOL = "EURUSD"
-START_DATE = "2024-04-01"
-END_DATE = "2024-06-30"
+START_DATE = "2023-01-01"
+END_DATE = "2025-12-31"
 
 TICK_SIZES = [100, 250, 500, 1000]
 
