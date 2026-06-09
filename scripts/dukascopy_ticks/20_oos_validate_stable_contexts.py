@@ -32,8 +32,8 @@ OUTPUT_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks" / "oos_context_validati
 
 SYMBOL = "EURUSD"
 
-START_DATE = "2024-04-01"
-END_DATE = "2024-06-30"
+START_DATE = "2023-01-01"
+END_DATE = "2025-12-31"
 
 TIB_THRESHOLD = 25
 PRESSURE_THRESHOLD = 0.60

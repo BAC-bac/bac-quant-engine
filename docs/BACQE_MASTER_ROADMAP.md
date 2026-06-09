@@ -444,3 +444,18 @@ Refactor Sentinel 05 to support:
 - future sentinel modules
 
 using a common sentinel schema
+
+Original Candidate:
+Rejected
+
+Refined Candidate:
+Provisionally Alive
+
+Most promising refinement:
+Tick Count >= Median
+
+Existing EURUSD candidate:
+- survives without costs
+- fails with realistic costs
+- shows contextual persistence
+- not currently tradable
