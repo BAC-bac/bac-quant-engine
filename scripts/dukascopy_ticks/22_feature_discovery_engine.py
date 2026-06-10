@@ -35,15 +35,13 @@ SYMBOL = "EURUSD"
 
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-# Add or adjust these if your Script 21 output is somewhere else
-INPUT_ROOTS = [
-    QUANT_LAB / "data" / "processed" / "dukascopy_ticks",
-]
+INPUT_ROOT = QUANT_LAB / "data" / "processed" / "dukascopy_engineered_features" / f"symbol={SYMBOL}"
 
 REPORT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_feature_discovery"
 
 FORWARD_WINDOWS = [1, 3, 5, 10, 20]
-MAX_ROWS_PER_DATASET = 100_000
+RUN_MUTUAL_INFO = False
+MAX_ROWS_PER_DATASET = 10_000
 MIN_VALID_ROWS = 1_000
 
 EXCLUDE_COLS = {
@@ -89,16 +87,14 @@ def ensure_dirs() -> None:
 
 
 def discover_files() -> list[Path]:
-    root = QUANT_LAB / "data" / "processed" / "dukascopy_ticks" / f"symbol={SYMBOL}"
-
-    if not root.exists():
-        print(f"[MISSING ROOT] {root}")
+    if not INPUT_ROOT.exists():
+        print(f"[MISSING INPUT ROOT] {INPUT_ROOT}")
         return []
 
-    files = sorted(root.rglob("*.parquet"))
+    files = sorted(INPUT_ROOT.rglob("*.parquet"))
 
-    print(f"Input root: {root}")
-    print(f"Parquet files found: {len(files)}")
+    print(f"Input root: {INPUT_ROOT}")
+    print(f"Engineered parquet files found: {len(files)}")
 
     return files
 
@@ -208,7 +204,7 @@ def calculate_spearman(x: pd.Series, y: pd.Series) -> tuple[float, float]:
 
 
 def calculate_mutual_info(x: pd.Series, y: pd.Series) -> float:
-    if mutual_info_regression is None:
+    if not RUN_MUTUAL_INFO:
         return np.nan
 
     valid = pd.concat([x, y], axis=1).replace([np.inf, -np.inf], np.nan).dropna()
