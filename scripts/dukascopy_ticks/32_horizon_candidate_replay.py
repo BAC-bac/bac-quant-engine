@@ -1,5 +1,5 @@
 """
-BACQE DUKASCOPY 28 - CANDIDATE REPLAY ENGINE
+BACQE DUKASCOPY 32 - HORIZON CANDIDATE REPLAY ENGINE
 
 Purpose:
     Replay top filtered Dukascopy signal candidates into trade-level ledgers.
@@ -31,7 +31,7 @@ CANDIDATE_PATH = (
 
 OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_candidate_replay"
 
-TOP_N_CANDIDATES = 20
+TOP_N_CANDIDATES = 3
 QUANTILE_LOW = 0.20
 QUANTILE_HIGH = 0.80
 
@@ -117,7 +117,7 @@ def load_candidates() -> pd.DataFrame:
 
     df["filter_type"] = "all"
     df["filter_value"] = "all"
-    
+
     return df.head(TOP_N_CANDIDATES)
 
 
@@ -348,7 +348,7 @@ def build_candidate_summary(trades: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
-    banner("BACQE DUKASCOPY 28 - CANDIDATE REPLAY ENGINE")
+    banner("BACQE DUKASCOPY 32 - HORIZON CANDIDATE REPLAY ENGINE")
 
     ensure_dirs()
 
