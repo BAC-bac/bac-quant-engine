@@ -1,0 +1,43 @@
+dukascopy_research:
+  enabled: true
+  data_lake_root: "E:/Quant_Lab"
+
+  symbols:
+    - EURUSD
+    - GBPUSD
+
+  date_range:
+    start: "2023-01-01"
+    end: "2025-12-31"
+
+  paths:
+    raw_root: "E:/Quant_Lab/data/raw/dukascopy_ticks"
+    processed_root: "E:/Quant_Lab/data/processed"
+    analysis_root: "E:/Quant_Lab/data/analysis"
+
+  download:
+    enabled: true
+    overwrite_existing: false
+    max_retries: 3
+    sleep_seconds: 0.25
+
+  features:
+    engineered_root: "E:/Quant_Lab/data/processed/dukascopy_engineered_features"
+    horizon_root: "E:/Quant_Lab/data/processed/dukascopy_horizon_features"
+    horizons:
+      - 1
+      - 3
+      - 5
+      - 10
+      - 20
+      - 25
+      - 50
+      - 100
+      - 250
+      - 500
+      - 1000
+
+  research:
+    target_feature: "mid_return_1"
+    target_horizon: "future_return_1000"
+    min_trades: 5000
