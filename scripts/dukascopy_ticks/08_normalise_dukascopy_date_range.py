@@ -2,30 +2,23 @@
 BACQE DUKASCOPY 08 - NORMALISE DATE RANGE TO PARQUET
 
 Purpose:
-    Decode one month of Dukascopy raw .bi5 tick files and save a clean
-    BACQE-compatible daily Parquet file.
+    Decode Dukascopy raw .bi5 tick files and save clean BACQE-compatible
+    daily Parquet files.
 
-Inputs:
-    E:\\Quant_Lab\\data\\raw\\dukascopy_ticks\\symbol=EURUSD\\year=2024\\month=01\\*.bi5
-
-Outputs:
-    E:\\Quant_Lab\\data\\processed\\dukascopy_ticks\\symbol=EURUSD\\year=2024\\month=01\\*.parquet
-
-Also saves:
-    E:\\Quant_Lab\\data\\analysis\\dukascopy_ticks\\normalisation_reports\\EURUSD_2024-01-01_to_2024-01-31_normalisation_report.csv
+Refactor note:
+    This script can still be run standalone, but now also exposes
+    run_normalisation() so other BACQE scripts can call the proven
+    normalisation logic for any symbol/date range.
 """
 
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
+import argparse
 import lzma
 import struct
 
 import pandas as pd
 
-
-# =============================================================================
-# CONFIG
-# =============================================================================
 
 DATA_ROOT = Path(r"E:\Quant_Lab\data")
 
@@ -33,9 +26,9 @@ RAW_ROOT = DATA_ROOT / "raw" / "dukascopy_ticks"
 PROCESSED_ROOT = DATA_ROOT / "processed" / "dukascopy_ticks"
 REPORT_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks" / "normalisation_reports"
 
-SYMBOL = "EURUSD"
-START_DATE = "2023-01-01"
-END_DATE = "2025-12-31"
+DEFAULT_SYMBOL = "EURUSD"
+DEFAULT_START_DATE = "2023-01-01"
+DEFAULT_END_DATE = "2025-12-31"
 
 SOURCE = "dukascopy"
 
@@ -43,10 +36,6 @@ PRICE_SCALE = 100000
 POINT_SIZE = 0.00001
 RECORD_SIZE = 20
 
-
-# =============================================================================
-# DATE HELPERS
-# =============================================================================
 
 def date_range(start: datetime, end: datetime):
     """
@@ -59,10 +48,6 @@ def date_range(start: datetime, end: datetime):
         yield current
         current += timedelta(days=1)
 
-
-# =============================================================================
-# PATH HELPERS
-# =============================================================================
 
 def raw_day_dir(symbol: str, dt: datetime) -> Path:
     return (
@@ -96,10 +81,6 @@ def quality_report_path(symbol: str, dt: datetime) -> Path:
         / f"{symbol}_{dt.strftime('%Y-%m-%d')}_quality_report.csv"
     )
 
-
-# =============================================================================
-# DECODING
-# =============================================================================
 
 def decode_hour_file(symbol: str, dt: datetime, hour: int) -> pd.DataFrame:
     file_path = raw_bi5_path(symbol, dt, hour)
@@ -169,10 +150,6 @@ def decode_hour_file(symbol: str, dt: datetime, hour: int) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
-# =============================================================================
-# CLEANING / VALIDATION
-# =============================================================================
 
 def clean_ticks(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     original_rows = len(df)
@@ -266,19 +243,20 @@ def build_quality_report(df: pd.DataFrame, clean_report: dict) -> pd.DataFrame:
     return pd.DataFrame([rows])
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
-
-def main() -> None:
-    start = datetime.strptime(START_DATE, "%Y-%m-%d")
-    end = datetime.strptime(END_DATE, "%Y-%m-%d")
+def run_normalisation(
+    symbol: str = DEFAULT_SYMBOL,
+    start_date: str = DEFAULT_START_DATE,
+    end_date: str = DEFAULT_END_DATE,
+) -> Path:
+    symbol = symbol.upper().strip()
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
 
     print("=" * 90)
     print("BACQE DUKASCOPY 08 - NORMALISE DATE RANGE TO PARQUET")
     print("=" * 90)
-    print(f"Symbol:     {SYMBOL}")
-    print(f"Date range: {START_DATE} to {END_DATE}")
+    print(f"Symbol:     {symbol}")
+    print(f"Date range: {start_date} to {end_date}")
     print("-" * 90)
 
     range_report_rows = []
@@ -289,7 +267,7 @@ def main() -> None:
         dfs = []
 
         for hour in range(24):
-            df_hour = decode_hour_file(SYMBOL, dt, hour)
+            df_hour = decode_hour_file(symbol, dt, hour)
 
             if df_hour.empty:
                 print(f"  [{hour:02d}:00] no rows decoded")
@@ -315,8 +293,8 @@ def main() -> None:
         df_raw = pd.concat(dfs, ignore_index=True)
         df_clean, clean_report = clean_ticks(df_raw)
 
-        out_path = processed_output_path(SYMBOL, dt)
-        daily_report_path = quality_report_path(SYMBOL, dt)
+        out_path = processed_output_path(symbol, dt)
+        daily_report_path = quality_report_path(symbol, dt)
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         daily_report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -353,7 +331,7 @@ def main() -> None:
 
     range_report_path = (
         REPORT_ROOT
-        / f"{SYMBOL}_{START_DATE}_to_{END_DATE}_normalisation_report.csv"
+        / f"{symbol}_{start_date}_to_{end_date}_normalisation_report.csv"
     )
 
     range_report_df = pd.DataFrame(range_report_rows)
@@ -370,6 +348,25 @@ def main() -> None:
     print(f"Total clean rows: {total_clean_rows:,}")
     print(f"Range report:     {range_report_path}")
     print("[DONE] Dukascopy date-range normalisation complete.")
+
+    return range_report_path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Normalise Dukascopy BI5 tick files to Parquet.")
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    parser.add_argument("--start-date", default=DEFAULT_START_DATE)
+    parser.add_argument("--end-date", default=DEFAULT_END_DATE)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    run_normalisation(
+        symbol=args.symbol,
+        start_date=args.start_date,
+        end_date=args.end_date,
+    )
 
 
 if __name__ == "__main__":

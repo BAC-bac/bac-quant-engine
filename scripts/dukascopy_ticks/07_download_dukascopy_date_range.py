@@ -4,15 +4,17 @@ BACQE DUKASCOPY 07 - DOWNLOAD DATE RANGE OF RAW TICK FILES
 Purpose:
     Download raw hourly Dukascopy .bi5 tick files across a date range.
 
-Initial target:
-    EURUSD
-    2024-01-01 to 2024-01-31
+Refactor note:
+    This script can still be run standalone, but now also exposes run_download()
+    so other BACQE scripts can call the proven downloader logic for any symbol/date range.
 """
 
 from pathlib import Path
 from datetime import datetime, timedelta
-import time
+import argparse
 import csv
+import time
+
 import requests
 
 
@@ -20,9 +22,9 @@ DATA_ROOT = Path(r"E:\Quant_Lab\data")
 RAW_ROOT = DATA_ROOT / "raw" / "dukascopy_ticks"
 REPORT_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks" / "download_reports"
 
-SYMBOL = "EURUSD"
-START_DATE = "2023-01-01"
-END_DATE = "2025-12-31"
+DEFAULT_SYMBOL = "EURUSD"
+DEFAULT_START_DATE = "2023-01-01"
+DEFAULT_END_DATE = "2025-12-31"
 
 BASE_URL = "https://datafeed.dukascopy.com/datafeed"
 
@@ -157,16 +159,21 @@ def save_range_report(rows: list[dict], symbol: str, start: datetime, end: datet
     return report_path
 
 
-def main() -> None:
-    start = datetime.strptime(START_DATE, "%Y-%m-%d")
-    end = datetime.strptime(END_DATE, "%Y-%m-%d")
+def run_download(
+    symbol: str = DEFAULT_SYMBOL,
+    start_date: str = DEFAULT_START_DATE,
+    end_date: str = DEFAULT_END_DATE,
+) -> Path:
+    symbol = symbol.upper().strip()
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
 
     print("=" * 90)
     print("BACQE DUKASCOPY 07 - DOWNLOAD DATE RANGE OF RAW TICK FILES")
     print("=" * 90)
-    print(f"Symbol:     {SYMBOL}")
-    print(f"Start date: {START_DATE}")
-    print(f"End date:   {END_DATE}")
+    print(f"Symbol:     {symbol}")
+    print(f"Start date: {start_date}")
+    print(f"End date:   {end_date}")
     print(f"Raw root:   {RAW_ROOT}")
     print("-" * 90)
 
@@ -178,8 +185,8 @@ def main() -> None:
         print(f"\n[DATE] {dt.strftime('%Y-%m-%d')}")
 
         for hour in range(24):
-            url = build_dukascopy_tick_url(SYMBOL, dt, hour)
-            output_path = build_output_path(SYMBOL, dt, hour)
+            url = build_dukascopy_tick_url(symbol, dt, hour)
+            output_path = build_output_path(symbol, dt, hour)
 
             result = download_file(url, output_path)
 
@@ -203,7 +210,7 @@ def main() -> None:
 
             time.sleep(SLEEP_SECONDS)
 
-        save_daily_manifest(daily_rows, SYMBOL, dt)
+        save_daily_manifest(daily_rows, symbol, dt)
 
         daily_downloaded = sum(1 for r in daily_rows if r["status"] == "downloaded")
         daily_existing = sum(1 for r in daily_rows if r["status"] == "exists")
@@ -217,7 +224,7 @@ def main() -> None:
             f"failed={daily_failed} | bytes={daily_bytes:,}"
         )
 
-    range_report = save_range_report(all_rows, SYMBOL, start, end)
+    range_report = save_range_report(all_rows, symbol, start, end)
 
     downloaded = sum(1 for r in all_rows if r["status"] == "downloaded")
     existing = sum(1 for r in all_rows if r["status"] == "exists")
@@ -235,6 +242,25 @@ def main() -> None:
     print(f"Total size:            {total_bytes:,} bytes")
     print(f"Range report:          {range_report}")
     print("[DONE] Dukascopy date-range raw download complete.")
+
+    return range_report
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Download Dukascopy raw BI5 tick files.")
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    parser.add_argument("--start-date", default=DEFAULT_START_DATE)
+    parser.add_argument("--end-date", default=DEFAULT_END_DATE)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    run_download(
+        symbol=args.symbol,
+        start_date=args.start_date,
+        end_date=args.end_date,
+    )
 
 
 if __name__ == "__main__":
