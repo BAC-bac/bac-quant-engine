@@ -3,21 +3,13 @@ BACQE DUKASCOPY 31 - HORIZON SIGNAL VALIDATION ENGINE
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
-
-FEATURE_ROOT = QUANT_LAB / "data" / "processed" / "dukascopy_horizon_features" / f"symbol={SYMBOL}"
-
-CANDIDATE_PATH = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_feature_stability"
-    / "top_features" / "top_stable_features_latest.csv"
-)
-
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_signal_validation"
 
 TOP_N_FEATURES = 30
 QUANTILE_LOW = 0.20
@@ -40,26 +32,57 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def build_feature_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "processed"
+        / "dukascopy_horizon_features"
+        / f"symbol={symbol}"
+    )
+
+
+def build_candidate_path(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_feature_stability"
+        / f"symbol={symbol}"
+        / "top_features"
+        / "top_stable_features_latest.csv"
+    )
+
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_signal_validation"
+        / f"symbol={symbol}"
+    )
+
+
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "signal_results",
-        OUTPUT_ROOT / "top_signals",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "signal_results",
+        output_root / "top_signals",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
 
-def discover_files() -> list[Path]:
-    return sorted(FEATURE_ROOT.rglob("*.parquet")) if FEATURE_ROOT.exists() else []
+def discover_files(feature_root: Path) -> list[Path]:
+    return sorted(feature_root.rglob("*.parquet")) if feature_root.exists() else []
 
 
-def load_candidate_features() -> list[str]:
-    df = pd.read_csv(CANDIDATE_PATH)
-
+def load_candidate_features(candidate_path: Path) -> list[str]:
+    df = pd.read_csv(candidate_path)
     df = df[df["feature"] != "mid"].copy()
 
-    features = (
+    return (
         df["feature"]
         .dropna()
         .astype(str)
@@ -67,8 +90,6 @@ def load_candidate_features() -> list[str]:
         .head(TOP_N_FEATURES)
         .tolist()
     )
-
-    return features
 
 
 def evaluate_returns(returns: pd.Series) -> dict:
@@ -90,7 +111,6 @@ def evaluate_returns(returns: pd.Series) -> dict:
 
     gross_profit = wins.sum()
     gross_loss = abs(losses.sum())
-
     profit_factor = gross_profit / gross_loss if gross_loss != 0 else np.nan
 
     std = returns.std()
@@ -181,20 +201,30 @@ def score_results(grouped: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def main() -> None:
+def run_horizon_signal_validation(symbol: str = DEFAULT_SYMBOL) -> None:
+    symbol = symbol.upper().strip()
+
+    feature_root = build_feature_root(symbol)
+    candidate_path = build_candidate_path(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 31 - HORIZON SIGNAL VALIDATION ENGINE")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:       {SYMBOL}")
-    print(f"Feature root: {FEATURE_ROOT}")
-    print(f"Candidates:   {CANDIDATE_PATH}")
-    print(f"Output root:  {OUTPUT_ROOT}")
+    print(f"Symbol:       {symbol}")
+    print(f"Feature root: {feature_root}")
+    print(f"Candidates:   {candidate_path}")
+    print(f"Output root:  {output_root}")
     print(f"Targets:      {TARGET_HORIZONS}")
     print("-" * 90)
 
-    files = discover_files()
-    candidate_features = load_candidate_features()
+    if not candidate_path.exists():
+        print("[STOP] Missing candidate feature file.")
+        return
+
+    files = discover_files(feature_root)
+    candidate_features = load_candidate_features(candidate_path)
 
     print(f"Horizon files discovered: {len(files)}")
     print(f"Candidate features:       {len(candidate_features)}")
@@ -251,10 +281,10 @@ def main() -> None:
 
     ranked = score_results(grouped)
 
-    raw_path = OUTPUT_ROOT / "signal_results" / "horizon_signal_validation_daily_latest.csv"
-    ranked_path = OUTPUT_ROOT / "signal_results" / "horizon_signal_validation_ranked_latest.csv"
-    top_path = OUTPUT_ROOT / "top_signals" / "top_horizon_signal_candidates_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "horizon_signal_validation_report_latest.txt"
+    raw_path = output_root / "signal_results" / "horizon_signal_validation_daily_latest.csv"
+    ranked_path = output_root / "signal_results" / "horizon_signal_validation_ranked_latest.csv"
+    top_path = output_root / "top_signals" / "top_horizon_signal_candidates_latest.csv"
+    report_path = output_root / "reports" / "horizon_signal_validation_report_latest.txt"
 
     raw.to_csv(raw_path, index=False)
     ranked.to_csv(ranked_path, index=False)
@@ -263,7 +293,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY HORIZON SIGNAL VALIDATION REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Files tested: {len(files)}\n")
         f.write(f"Candidate features: {len(candidate_features)}\n")
         f.write(f"Targets tested: {TARGET_HORIZONS}\n")
@@ -307,6 +337,19 @@ def main() -> None:
     print(f"Top:    {top_path}")
     print(f"Report: {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Validate Dukascopy horizon signal candidates."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    run_horizon_signal_validation(symbol=args.symbol)
 
 
 if __name__ == "__main__":
