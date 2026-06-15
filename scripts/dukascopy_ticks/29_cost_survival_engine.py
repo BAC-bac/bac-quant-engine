@@ -3,19 +3,34 @@ BACQE DUKASCOPY 29 - COST SURVIVAL ENGINE
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-INPUT_LEDGER = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_candidate_replay"
-    / "trade_ledgers" / "candidate_replay_ledger_latest.parquet"
-)
+def build_input_ledger(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_candidate_replay"
+        / f"symbol={symbol}"
+        / "trade_ledgers"
+        / "candidate_replay_ledger_latest.parquet"
+    )
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_cost_survival"
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_cost_survival"
+        / f"symbol={symbol}"
+    )
 
 # Conservative cost model for tick-level research.
 # EURUSD pip = 0.0001.
@@ -56,12 +71,12 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "cost_results",
-        OUTPUT_ROOT / "survivors",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "cost_results",
+        output_root / "survivors",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -143,21 +158,28 @@ def classify_survival(row: pd.Series) -> str:
     return "fails_costs"
 
 
-def main() -> None:
+def run_cost_survival(
+    symbol: str = DEFAULT_SYMBOL,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    input_ledger = build_input_ledger(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 29 - COST SURVIVAL ENGINE")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:       {SYMBOL}")
-    print(f"Input ledger: {INPUT_LEDGER}")
-    print(f"Output root:  {OUTPUT_ROOT}")
+    print(f"Symbol:       {symbol}")
+    print(f"Input ledger: {input_ledger}")
+    print(f"Output root:  {output_root}")
     print("-" * 90)
 
-    if not INPUT_LEDGER.exists():
+    if not input_ledger.exists():
         print("[STOP] Missing candidate replay ledger.")
         return
 
-    ledger = pd.read_parquet(INPUT_LEDGER)
+    ledger = pd.read_parquet(input_ledger)
 
     print(f"Loaded ledger rows: {len(ledger):,}")
 
@@ -273,9 +295,9 @@ def main() -> None:
 
     survivors = results[results["survival_label"] != "fails_costs"].copy()
 
-    output_all = OUTPUT_ROOT / "cost_results" / "cost_survival_results_latest.csv"
-    output_survivors = OUTPUT_ROOT / "survivors" / "cost_survivors_latest.csv"
-    output_report = OUTPUT_ROOT / "reports" / "cost_survival_report_latest.txt"
+    output_all = output_root / "cost_results" / "cost_survival_results_latest.csv"
+    output_survivors = output_root / "survivors" / "cost_survivors_latest.csv"
+    output_report = output_root / "reports" / "cost_survival_report_latest.txt"
 
     results.to_csv(output_all, index=False)
     survivors.to_csv(output_survivors, index=False)
@@ -283,7 +305,7 @@ def main() -> None:
     with open(output_report, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY COST SURVIVAL REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Input ledger rows: {len(ledger):,}\n")
         f.write(f"Cost scenarios tested: {len(COST_SCENARIOS)}\n")
         f.write(f"Result rows: {len(results):,}\n")
@@ -331,6 +353,22 @@ def main() -> None:
     print(f"Survivors: {output_survivors}")
     print(f"Report:    {output_report}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy cost survival."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_cost_survival(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":

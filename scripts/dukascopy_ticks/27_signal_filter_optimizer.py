@@ -3,21 +3,44 @@ BACQE DUKASCOPY 27 - SIGNAL FILTER OPTIMIZER
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-FEATURE_ROOT = QUANT_LAB / "data" / "processed" / "dukascopy_engineered_features" / f"symbol={SYMBOL}"
+def build_feature_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "processed"
+        / "dukascopy_engineered_features"
+        / f"symbol={symbol}"
+    )
 
-CANDIDATE_PATH = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_signal_forensics"
-    / "top_robust_signals" / "top_robust_signals_latest.csv"
-)
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_signal_filter_optimizer"
+def build_candidate_path(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_signal_forensics"
+        / f"symbol={symbol}"
+        / "top_robust_signals"
+        / "top_robust_signals_latest.csv"
+    )
+
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_signal_filter_optimizer"
+        / f"symbol={symbol}"
+    )
 
 TOP_N_SIGNALS = 15
 QUANTILE_LOW = 0.20
@@ -31,22 +54,22 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "filter_results",
-        OUTPUT_ROOT / "top_filtered_signals",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "filter_results",
+        output_root / "top_filtered_signals",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
 
-def discover_feature_files() -> list[Path]:
-    return sorted(FEATURE_ROOT.rglob("*.parquet")) if FEATURE_ROOT.exists() else []
+def discover_feature_files(feature_root: Path) -> list[Path]:
+    return sorted(feature_root.rglob("*.parquet")) if feature_root.exists() else []
 
 
-def load_candidates() -> pd.DataFrame:
-    df = pd.read_csv(CANDIDATE_PATH)
+def load_candidates(candidate_path: Path) -> pd.DataFrame:
+    df = pd.read_csv(candidate_path)
 
     df = df[df["forensic_label"].isin(["robust_candidate", "research_candidate"])].copy()
 
@@ -230,19 +253,27 @@ def score_results(results: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def main() -> None:
+def run_signal_filter_optimizer(
+    symbol: str = DEFAULT_SYMBOL
+) -> None:
+    symbol = symbol.upper().strip()
+
+    feature_root = build_feature_root(symbol)
+    candidate_path = build_candidate_path(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 27 - SIGNAL FILTER OPTIMIZER")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:       {SYMBOL}")
-    print(f"Feature root: {FEATURE_ROOT}")
-    print(f"Candidates:   {CANDIDATE_PATH}")
-    print(f"Output root:  {OUTPUT_ROOT}")
+    print(f"Symbol:       {symbol}")
+    print(f"Feature root: {feature_root}")
+    print(f"Candidates:   {candidate_path}")
+    print(f"Output root:  {output_root}")
     print("-" * 90)
 
-    files = discover_feature_files()
-    candidates = load_candidates()
+    files = discover_feature_files(feature_root)
+    candidates = load_candidates(candidate_path)
 
     print(f"Feature files: {len(files)}")
     print(f"Candidates:    {len(candidates)}")
@@ -327,10 +358,10 @@ def main() -> None:
     results = pd.DataFrame(all_rows)
     ranked = score_results(results)
 
-    output_all = OUTPUT_ROOT / "filter_results" / "signal_filter_results_latest.csv"
-    output_ranked = OUTPUT_ROOT / "filter_results" / "signal_filter_ranked_latest.csv"
-    output_top = OUTPUT_ROOT / "top_filtered_signals" / "top_filtered_signals_latest.csv"
-    output_report = OUTPUT_ROOT / "reports" / "signal_filter_optimizer_report_latest.txt"
+    output_all = output_root / "filter_results" / "signal_filter_results_latest.csv"
+    output_ranked = output_root / "filter_results" / "signal_filter_ranked_latest.csv"
+    output_top = output_root / "top_filtered_signals" / "top_filtered_signals_latest.csv"
+    output_report = output_root / "reports" / "signal_filter_optimizer_report_latest.txt"
 
     results.to_csv(output_all, index=False)
     ranked.to_csv(output_ranked, index=False)
@@ -339,7 +370,7 @@ def main() -> None:
     with open(output_report, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY SIGNAL FILTER OPTIMIZER REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Signals tested: {len(candidates)}\n")
         f.write(f"Feature files: {len(files)}\n")
         f.write(f"Filter result rows: {len(results):,}\n")
@@ -382,6 +413,22 @@ def main() -> None:
     print(f"Top:    {output_top}")
     print(f"Report: {output_report}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy signal filter optimizer."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_signal_filter_optimizer(
+        symbol=args.symbol
+    )
 
 
 if __name__ == "__main__":

@@ -5,21 +5,45 @@ BACQE DUKASCOPY 25 - SIGNAL VALIDATION ENGINE
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import argparse
 
+from apps.bacqe_streamlit_terminal import symbols
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-FEATURE_ROOT = (
-    QUANT_LAB / "data" / "processed" / "dukascopy_engineered_features" / f"symbol={SYMBOL}"
-)
 
-TOP_FEATURES_PATH = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_feature_stability"
-    / "top_features" / "top_stable_features_latest.csv"
-)
+def build_feature_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "processed"
+        / "dukascopy_engineered_features"
+        / f"symbol={symbol}"
+    )
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_signal_validation"
+
+def build_top_features_path(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_feature_stability"
+        / f"symbol={symbol}"
+        / "top_features"
+        / "top_stable_features_latest.csv"
+    )
+
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_signal_validation"
+        / f"symbol={symbol}"
+    )
+
 
 TOP_N_FEATURES = 25
 QUANTILE_LOW = 0.20
@@ -34,28 +58,28 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "signal_results",
-        OUTPUT_ROOT / "top_signals",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "signal_results",
+        output_root / "top_signals",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
 
-def discover_feature_files() -> list[Path]:
-    if not FEATURE_ROOT.exists():
-        print(f"[MISSING FEATURE ROOT] {FEATURE_ROOT}")
+def discover_feature_files(feature_root: Path) -> list[Path]:
+    if not feature_root.exists():
+        print(f"[MISSING FEATURE ROOT] {feature_root}")
         return []
-    return sorted(FEATURE_ROOT.rglob("*.parquet"))
+    return sorted(feature_root.rglob("*.parquet"))
 
 
-def load_candidate_features() -> pd.DataFrame:
-    if not TOP_FEATURES_PATH.exists():
-        raise FileNotFoundError(f"Missing top features file: {TOP_FEATURES_PATH}")
+def load_candidate_features(top_features_path: Path) -> pd.DataFrame:
+    if not top_features_path.exists():
+        raise FileNotFoundError(f"Missing top features file: {top_features_path}")
 
-    df = pd.read_csv(TOP_FEATURES_PATH)
+    df = pd.read_csv(top_features_path)
 
     required = {"feature", "target", "dominant_direction", "rank"}
     missing = required - set(df.columns)
@@ -200,19 +224,26 @@ def score_final_results(results: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def main() -> None:
+def run_signal_validation(
+    symbol: str = DEFAULT_SYMBOL
+) -> None:
+    symbol = symbol.upper().strip()
+
+    feature_root = build_feature_root(symbol)
+    top_features_path = build_top_features_path(symbol)
+    output_root = build_output_root(symbol)
     banner("BACQE DUKASCOPY 25 - SIGNAL VALIDATION ENGINE")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:        {SYMBOL}")
-    print(f"Feature root:  {FEATURE_ROOT}")
-    print(f"Top features:  {TOP_FEATURES_PATH}")
-    print(f"Output root:   {OUTPUT_ROOT}")
+    print(f"Symbol:        {symbol}")
+    print(f"Feature root:  {feature_root}")
+    print(f"Top features:  {top_features_path}")
+    print(f"Output root:   {output_root}")
     print("-" * 90)
 
-    candidates = load_candidate_features()
-    files = discover_feature_files()
+    candidates = load_candidate_features(top_features_path)
+    files = discover_feature_files(feature_root)
 
     print(f"Candidate feature-target pairs: {len(candidates)}")
     print(f"Engineered feature files:       {len(files)}")
@@ -279,10 +310,10 @@ def main() -> None:
 
     ranked = score_final_results(grouped)
 
-    raw_path = OUTPUT_ROOT / "signal_results" / "signal_validation_daily_latest.csv"
-    ranked_path = OUTPUT_ROOT / "signal_results" / "signal_validation_ranked_latest.csv"
-    top_path = OUTPUT_ROOT / "top_signals" / "top_signal_candidates_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "signal_validation_report_latest.txt"
+    raw_path = output_root / "signal_results" / "signal_validation_daily_latest.csv"
+    ranked_path = output_root / "signal_results" / "signal_validation_ranked_latest.csv"
+    top_path = output_root / "top_signals" / "top_signal_candidates_latest.csv"
+    report_path = output_root / "reports" / "signal_validation_report_latest.txt"
 
     raw_results.to_csv(raw_path, index=False)
     ranked.to_csv(ranked_path, index=False)
@@ -291,7 +322,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY SIGNAL VALIDATION REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Candidate feature-target pairs: {len(candidates)}\n")
         f.write(f"Files tested: {len(files)}\n")
         f.write(f"Raw validation rows: {len(raw_results):,}\n")
@@ -334,6 +365,22 @@ def main() -> None:
     print(f"Top:       {top_path}")
     print(f"Report:    {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Validate Dukascopy signal candidates."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_signal_validation(
+        symbol=args.symbol
+    )
 
 
 if __name__ == "__main__":

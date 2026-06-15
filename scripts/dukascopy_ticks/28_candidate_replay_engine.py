@@ -13,23 +13,44 @@ Output:
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-FEATURE_ROOT = (
-    QUANT_LAB / "data" / "processed" / "dukascopy_engineered_features" / f"symbol={SYMBOL}"
-)
+def build_feature_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "processed"
+        / "dukascopy_engineered_features"
+        / f"symbol={symbol}"
+    )
 
-CANDIDATE_PATH = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_signal_filter_optimizer"
-    / "top_filtered_signals" / "top_filtered_signals_latest.csv"
-)
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_candidate_replay"
+def build_candidate_path(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_signal_filter_optimizer"
+        / f"symbol={symbol}"
+        / "top_filtered_signals"
+        / "top_filtered_signals_latest.csv"
+    )
+
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_candidate_replay"
+        / f"symbol={symbol}"
+    )
 
 TOP_N_CANDIDATES = 20
 QUANTILE_LOW = 0.20
@@ -44,18 +65,18 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "trade_ledgers",
-        OUTPUT_ROOT / "candidate_summaries",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "trade_ledgers",
+        output_root / "candidate_summaries",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
 
-def discover_feature_files() -> list[Path]:
-    return sorted(FEATURE_ROOT.rglob("*.parquet")) if FEATURE_ROOT.exists() else []
+def discover_feature_files(feature_root: Path) -> list[Path]:
+    return sorted(feature_root.rglob("*.parquet")) if feature_root.exists() else []
 
 
 def assign_session(hour: int) -> str:
@@ -100,11 +121,11 @@ def add_context_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_candidates() -> pd.DataFrame:
-    if not CANDIDATE_PATH.exists():
-        raise FileNotFoundError(f"Missing candidate file: {CANDIDATE_PATH}")
+def load_candidates(candidate_path: Path) -> pd.DataFrame:
+    if not candidate_path.exists():
+        raise FileNotFoundError(f"Missing candidate file: {candidate_path}")
 
-    df = pd.read_csv(CANDIDATE_PATH)
+    df = pd.read_csv(candidate_path)
 
     required = {
         "feature",
@@ -350,19 +371,27 @@ def build_candidate_summary(trades: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
-def main() -> None:
+def run_candidate_replay(
+    symbol: str = DEFAULT_SYMBOL,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    feature_root = build_feature_root(symbol)
+    candidate_path = build_candidate_path(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 28 - CANDIDATE REPLAY ENGINE")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:       {SYMBOL}")
-    print(f"Feature root: {FEATURE_ROOT}")
-    print(f"Candidates:   {CANDIDATE_PATH}")
-    print(f"Output root:  {OUTPUT_ROOT}")
+    print(f"Symbol:       {symbol}")
+    print(f"Feature root: {feature_root}")
+    print(f"Candidates:   {candidate_path}")
+    print(f"Output root:  {output_root}")
     print("-" * 90)
 
-    files = discover_feature_files()
-    candidates = load_candidates()
+    files = discover_feature_files(feature_root)
+    candidates = load_candidates(candidate_path)
 
     print(f"Feature files discovered: {len(files)}")
     print(f"Candidates loaded:         {len(candidates)}")
@@ -399,10 +428,10 @@ def main() -> None:
     ledger = pd.concat(all_trades, ignore_index=True)
     summary = build_candidate_summary(ledger)
 
-    ledger_path = OUTPUT_ROOT / "trade_ledgers" / "candidate_replay_ledger_latest.parquet"
-    ledger_csv_path = OUTPUT_ROOT / "trade_ledgers" / "candidate_replay_ledger_latest.csv"
-    summary_path = OUTPUT_ROOT / "candidate_summaries" / "candidate_replay_summary_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "candidate_replay_report_latest.txt"
+    ledger_path = output_root / "trade_ledgers" / "candidate_replay_ledger_latest.parquet"
+    ledger_csv_path = output_root / "trade_ledgers" / "candidate_replay_ledger_latest.csv"
+    summary_path = output_root / "candidate_summaries" / "candidate_replay_summary_latest.csv"
+    report_path = output_root / "reports" / "candidate_replay_report_latest.txt"
 
     ledger.to_parquet(ledger_path, index=False)
     ledger.head(250_000).to_csv(ledger_csv_path, index=False)
@@ -411,7 +440,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY CANDIDATE REPLAY REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Feature files: {len(files)}\n")
         f.write(f"Candidates replayed: {len(candidates)}\n")
         f.write(f"Replay trades generated: {len(ledger):,}\n")
@@ -458,6 +487,22 @@ def main() -> None:
     print(f"Summary: {summary_path}")
     print(f"Report: {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy candidate replay."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_candidate_replay(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":

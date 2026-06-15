@@ -14,19 +14,13 @@ Purpose:
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
-
-INPUT_PATH = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_signal_validation"
-    / "signal_results" / "signal_validation_daily_latest.csv"
-)
-
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_signal_forensics"
 
 TOP_N = 50
 
@@ -37,23 +31,47 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def build_input_path(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_signal_validation"
+        / f"symbol={symbol}"
+        / "signal_results"
+        / "signal_validation_daily_latest.csv"
+    )
+
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_signal_forensics"
+        / f"symbol={symbol}"
+    )
+
+
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "signal_forensics",
-        OUTPUT_ROOT / "top_robust_signals",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "signal_forensics",
+        output_root / "top_robust_signals",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
 
 def extract_date_from_dataset(dataset: str) -> pd.Timestamp:
     parts = dataset.split("_")
+
     for part in parts:
         try:
             return pd.to_datetime(part, errors="raise")
         except Exception:
             continue
+
     return pd.NaT
 
 
@@ -77,21 +95,26 @@ def classify_signal(row: pd.Series) -> str:
     return "reject"
 
 
-def main() -> None:
+def run_signal_forensics(symbol: str = DEFAULT_SYMBOL) -> None:
+    symbol = symbol.upper().strip()
+
+    input_path = build_input_path(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 26 - SIGNAL FORENSICS ENGINE")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:      {SYMBOL}")
-    print(f"Input path:  {INPUT_PATH}")
-    print(f"Output root: {OUTPUT_ROOT}")
+    print(f"Symbol:      {symbol}")
+    print(f"Input path:  {input_path}")
+    print(f"Output root: {output_root}")
     print("-" * 90)
 
-    if not INPUT_PATH.exists():
+    if not input_path.exists():
         print("[STOP] Missing Script 25 daily validation file.")
         return
 
-    df = pd.read_csv(INPUT_PATH)
+    df = pd.read_csv(input_path)
 
     print(f"Loaded rows: {len(df):,}")
 
@@ -134,7 +157,6 @@ def main() -> None:
 
     df = df.replace([np.inf, -np.inf], np.nan)
 
-    # Main signal-level forensics
     grouped = (
         df.groupby(["feature", "target", "side"], as_index=False)
         .agg(
@@ -158,7 +180,6 @@ def main() -> None:
         )
     )
 
-    # Year-level robustness
     yearly = (
         df.groupby(["feature", "target", "side", "year"], as_index=False)
         .agg(
@@ -190,7 +211,6 @@ def main() -> None:
         how="left",
     )
 
-    # Month-level robustness
     monthly = (
         df.groupby(["feature", "target", "side", "month"], as_index=False)
         .agg(
@@ -221,7 +241,6 @@ def main() -> None:
         how="left",
     )
 
-    # Conservative robustness score
     grouped["profit_factor_score"] = grouped["mean_profit_factor"].clip(0, 3) / 3
     grouped["positive_day_score"] = grouped["positive_day_rate"].fillna(0)
     grouped["month_score"] = grouped["month_consistency"].fillna(0)
@@ -250,9 +269,9 @@ def main() -> None:
 
     top = grouped.head(TOP_N)
 
-    output_all = OUTPUT_ROOT / "signal_forensics" / "signal_forensics_latest.csv"
-    output_top = OUTPUT_ROOT / "top_robust_signals" / "top_robust_signals_latest.csv"
-    output_report = OUTPUT_ROOT / "reports" / "signal_forensics_report_latest.txt"
+    output_all = output_root / "signal_forensics" / "signal_forensics_latest.csv"
+    output_top = output_root / "top_robust_signals" / "top_robust_signals_latest.csv"
+    output_report = output_root / "reports" / "signal_forensics_report_latest.txt"
 
     grouped.to_csv(output_all, index=False)
     top.to_csv(output_top, index=False)
@@ -260,7 +279,7 @@ def main() -> None:
     with open(output_report, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY SIGNAL FORENSICS REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Input rows: {len(df):,}\n")
         f.write(f"Signals analysed: {len(grouped):,}\n\n")
 
@@ -303,6 +322,19 @@ def main() -> None:
     print(f"Top:    {output_top}")
     print(f"Report: {output_report}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy signal forensics."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    run_signal_forensics(symbol=args.symbol)
 
 
 if __name__ == "__main__":
