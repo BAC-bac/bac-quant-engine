@@ -20,7 +20,7 @@ import pandas as pd
 # CONFIG
 # =============================================================================
 
-SYMBOL = "EURUSD"
+SYMBOL = "GBPUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
 INPUT_ROOT = QUANT_LAB / "data" / "processed" / "dukascopy_ticks" / f"symbol={SYMBOL}"
