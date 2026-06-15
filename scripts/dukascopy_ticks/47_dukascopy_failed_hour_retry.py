@@ -132,6 +132,9 @@ def main() -> None:
     # Exclude typical Friday late-market-close hours.
     failed = failed[~((failed["weekday"] == 4) & (failed["hour"].astype(int).isin([22, 23])))].copy()
 
+    # Exclude typical Friday late-market-close/session-boundary hours.
+    failed = failed[~((failed["weekday"] == 4) & (failed["hour"].astype(int).isin([21, 22, 23])))].copy()
+
     failed = failed.sort_values(["symbol", "date", "hour"])
     failed = failed.drop_duplicates(subset=["symbol", "date", "hour"])
 

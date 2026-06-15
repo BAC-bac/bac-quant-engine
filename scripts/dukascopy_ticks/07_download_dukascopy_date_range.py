@@ -159,6 +159,32 @@ def save_range_report(rows: list[dict], symbol: str, start: datetime, end: datet
     return report_path
 
 
+def download_one_hour(
+    symbol: str,
+    date: str,
+    hour: int,
+) -> dict:
+    symbol = symbol.upper().strip()
+    dt = datetime.strptime(date, "%Y-%m-%d")
+
+    url = build_dukascopy_tick_url(symbol, dt, hour)
+    output_path = build_output_path(symbol, dt, hour)
+
+    result = download_file(url, output_path)
+
+    row = {
+        "date": dt.strftime("%Y-%m-%d"),
+        "hour": hour,
+        "status": result["status"],
+        "bytes": result["bytes"],
+        "path": result["path"],
+        "url": result["url"],
+        "error": result["error"],
+    }
+
+    return row
+
+
 def run_download(
     symbol: str = DEFAULT_SYMBOL,
     start_date: str = DEFAULT_START_DATE,
