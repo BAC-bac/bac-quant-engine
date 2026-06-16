@@ -3,24 +3,44 @@ BACQE DUKASCOPY 41 - MONTE CARLO STABILITY ENGINE
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-CONTEXT_LEDGER = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_context_replay"
-    / "trade_ledgers" / "horizon_context_replay_ledger_latest.parquet"
-)
+def build_context_ledger(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_context_replay"
+        / f"symbol={symbol}"
+        / "trade_ledgers"
+        / "horizon_context_replay_ledger_latest.parquet"
+    )
 
-DAILY_GAP_PATH = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_weekend_gap_research"
-    / "gap_tables" / "daily_open_gap_table_latest.csv"
-)
+def build_daily_gap_path(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_weekend_gap_research"
+        / f"symbol={symbol}"
+        / "gap_tables"
+        / "daily_open_gap_table_latest.csv"
+    )
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_monte_carlo_stability"
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_monte_carlo_stability"
+        / f"symbol={symbol}"
+    )
 
 TARGET_CONDITION = "monday_asia_medium_gap_gap_down"
 
@@ -37,12 +57,12 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "simulation_results",
-        OUTPUT_ROOT / "stress_results",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "simulation_results",
+        output_root / "stress_results",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -105,9 +125,12 @@ def attach_gap_info(ledger: pd.DataFrame, gaps: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def load_target_trades() -> pd.DataFrame:
-    ledger = pd.read_parquet(CONTEXT_LEDGER)
-    gaps = pd.read_csv(DAILY_GAP_PATH)
+def load_target_trades(
+    context_ledger: Path,
+    daily_gap_path: Path,
+) -> pd.DataFrame:
+    ledger = pd.read_parquet(context_ledger)
+    gaps = pd.read_csv(daily_gap_path)
 
     required = {
         "timestamp_utc",
@@ -206,28 +229,33 @@ def summarise_simulations(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFra
 
     return pd.DataFrame(rows)
 
+def run_monte_carlo_stability(symbol: str = DEFAULT_SYMBOL, ) -> None:
+    symbol = symbol.upper().strip()
 
-def main() -> None:
+    context_ledger = build_context_ledger(symbol)
+    daily_gap_path = build_daily_gap_path(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 41 - MONTE CARLO STABILITY ENGINE")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:          {SYMBOL}")
-    print(f"Context ledger:  {CONTEXT_LEDGER}")
-    print(f"Daily gaps:      {DAILY_GAP_PATH}")
-    print(f"Output root:     {OUTPUT_ROOT}")
+    print(f"Symbol:          {symbol}")
+    print(f"Context ledger:  {context_ledger}")
+    print(f"Daily gaps:      {daily_gap_path}")
+    print(f"Output root:     {output_root}")
     print(f"Target condition:{TARGET_CONDITION}")
     print("-" * 90)
 
-    if not CONTEXT_LEDGER.exists():
+    if not context_ledger.exists():
         print("[STOP] Missing Script 35 ledger.")
         return
 
-    if not DAILY_GAP_PATH.exists():
+    if not daily_gap_path.exists():
         print("[STOP] Missing Script 39 daily gap table.")
         return
 
-    trades = load_target_trades()
+    trades = load_target_trades(context_ledger=context_ledger, daily_gap_path=daily_gap_path, )
 
     print(f"Target trades loaded: {len(trades):,}")
 
@@ -286,11 +314,11 @@ def main() -> None:
         ["simulation_type", "removal_fraction"],
     )
 
-    sim_path = OUTPUT_ROOT / "simulation_results" / "monte_carlo_bootstrap_latest.csv"
-    stress_path = OUTPUT_ROOT / "stress_results" / "monte_carlo_trade_removal_latest.csv"
-    bootstrap_summary_path = OUTPUT_ROOT / "simulation_results" / "monte_carlo_bootstrap_summary_latest.csv"
-    stress_summary_path = OUTPUT_ROOT / "stress_results" / "monte_carlo_trade_removal_summary_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "monte_carlo_stability_report_latest.txt"
+    sim_path = output_root / "simulation_results" / "monte_carlo_bootstrap_latest.csv"
+    stress_path = output_root / "stress_results" / "monte_carlo_trade_removal_latest.csv"
+    bootstrap_summary_path = output_root / "simulation_results" / "monte_carlo_bootstrap_summary_latest.csv"
+    stress_summary_path = output_root / "stress_results" / "monte_carlo_trade_removal_summary_latest.csv"
+    report_path = output_root / "reports" / "monte_carlo_stability_report_latest.txt"
 
     simulation_df.to_csv(sim_path, index=False)
     stress_df.to_csv(stress_path, index=False)
@@ -300,7 +328,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY MONTE CARLO STABILITY REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Target condition: {TARGET_CONDITION}\n")
         f.write(f"Trades tested: {len(trades):,}\n")
         f.write(f"Simulations: {N_SIMULATIONS}\n\n")
@@ -336,6 +364,22 @@ def main() -> None:
     print(f"Trade removal:          {stress_path}")
     print(f"Report:                 {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy Monte Carlo stability engine."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_monte_carlo_stability(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":

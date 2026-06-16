@@ -9,19 +9,34 @@ Purpose:
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-INPUT_LEDGER = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_context_replay"
-    / "trade_ledgers" / "horizon_context_replay_ledger_latest.parquet"
-)
+def build_input_ledger(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_context_replay"
+        / f"symbol={symbol}"
+        / "trade_ledgers"
+        / "horizon_context_replay_ledger_latest.parquet"
+    )
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_context_oos_validation"
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_context_oos_validation"
+        / f"symbol={symbol}"
+    )
 
 MIN_TRADES_PER_YEAR = 5_000
 
@@ -32,12 +47,12 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "yearly_validation",
-        OUTPUT_ROOT / "oos_rankings",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "yearly_validation",
+        output_root / "oos_rankings",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -95,21 +110,28 @@ def classify_oos(row: pd.Series) -> str:
     return "oos_reject"
 
 
-def main() -> None:
+def run_context_oos_validation(
+    symbol: str = DEFAULT_SYMBOL,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    input_ledger = build_input_ledger(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 36 - CONTEXT OOS VALIDATION")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:       {SYMBOL}")
-    print(f"Input ledger: {INPUT_LEDGER}")
-    print(f"Output root:  {OUTPUT_ROOT}")
+    print(f"Symbol:       {symbol}")
+    print(f"Input ledger: {input_ledger}")
+    print(f"Output root:  {output_root}")
     print("-" * 90)
 
-    if not INPUT_LEDGER.exists():
+    if not input_ledger.exists():
         print("[STOP] Missing Script 35 context replay ledger.")
         return
 
-    ledger = pd.read_parquet(INPUT_LEDGER)
+    ledger = pd.read_parquet(input_ledger)
 
     print(f"Loaded ledger rows: {len(ledger):,}")
 
@@ -246,9 +268,9 @@ def main() -> None:
     oos = oos.sort_values("oos_score", ascending=False)
     oos.insert(0, "oos_rank", range(1, len(oos) + 1))
 
-    yearly_path = OUTPUT_ROOT / "yearly_validation" / "context_oos_yearly_latest.csv"
-    oos_path = OUTPUT_ROOT / "oos_rankings" / "context_oos_ranked_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "context_oos_validation_report_latest.txt"
+    yearly_path = output_root / "yearly_validation" / "context_oos_yearly_latest.csv"
+    oos_path = output_root / "oos_rankings" / "context_oos_ranked_latest.csv"
+    report_path = output_root / "reports" / "context_oos_validation_report_latest.txt"
 
     yearly.to_csv(yearly_path, index=False)
     oos.to_csv(oos_path, index=False)
@@ -256,7 +278,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY CONTEXT OOS VALIDATION REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Input ledger rows: {len(ledger):,}\n")
         f.write(f"Yearly rows: {len(yearly):,}\n")
         f.write(f"OOS candidates: {len(oos):,}\n\n")
@@ -305,6 +327,22 @@ def main() -> None:
     print(f"Ranked: {oos_path}")
     print(f"Report: {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy context OOS validation."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_context_oos_validation(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":

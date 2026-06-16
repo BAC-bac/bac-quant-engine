@@ -3,20 +3,35 @@ BACQE DUKASCOPY 34 - HORIZON CONTEXT OPTIMIZER
 """
 
 from pathlib import Path
+import argparse
 import itertools
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-INPUT_LEDGER = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_candidate_replay"
-    / "trade_ledgers" / "candidate_replay_ledger_latest.parquet"
-)
+def build_input_ledger(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_candidate_replay"
+        / f"symbol={symbol}"
+        / "trade_ledgers"
+        / "candidate_replay_ledger_latest.parquet"
+    )
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_context_optimizer"
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_context_optimizer"
+        / f"symbol={symbol}"
+    )
 
 PIP_SIZE = 0.0001
 MIN_TRADES = 50_000
@@ -43,12 +58,12 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "context_results",
-        OUTPUT_ROOT / "top_contexts",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "context_results",
+        output_root / "top_contexts",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -216,22 +231,29 @@ def analyse_contexts(ledger: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main() -> None:
+def run_horizon_context_optimizer(
+    symbol: str = DEFAULT_SYMBOL,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    input_ledger = build_input_ledger(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 34 - HORIZON CONTEXT OPTIMIZER")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:       {SYMBOL}")
-    print(f"Input ledger: {INPUT_LEDGER}")
-    print(f"Output root:  {OUTPUT_ROOT}")
+    print(f"Symbol:       {symbol}")
+    print(f"Input ledger: {input_ledger}")
+    print(f"Output root:  {output_root}")
     print(f"Cost model:   {COST_SCENARIO_NAME}")
     print("-" * 90)
 
-    if not INPUT_LEDGER.exists():
+    if not input_ledger.exists():
         print("[STOP] Missing horizon replay ledger.")
         return
 
-    ledger = pd.read_parquet(INPUT_LEDGER)
+    ledger = pd.read_parquet(input_ledger)
     print(f"Loaded ledger rows: {len(ledger):,}")
 
     required = {
@@ -262,10 +284,10 @@ def main() -> None:
 
     ranked = score_results(results)
 
-    output_all = OUTPUT_ROOT / "context_results" / "horizon_context_results_latest.csv"
-    output_ranked = OUTPUT_ROOT / "context_results" / "horizon_context_ranked_latest.csv"
-    output_top = OUTPUT_ROOT / "top_contexts" / "top_horizon_contexts_latest.csv"
-    output_report = OUTPUT_ROOT / "reports" / "horizon_context_optimizer_report_latest.txt"
+    output_all = output_root / "context_results" / "horizon_context_results_latest.csv"
+    output_ranked = output_root / "context_results" / "horizon_context_ranked_latest.csv"
+    output_top = output_root / "top_contexts" / "top_horizon_contexts_latest.csv"
+    output_report = output_root / "reports" / "horizon_context_optimizer_report_latest.txt"
 
     results.to_csv(output_all, index=False)
     ranked.to_csv(output_ranked, index=False)
@@ -274,7 +296,7 @@ def main() -> None:
     with open(output_report, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY HORIZON CONTEXT OPTIMIZER REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Input ledger rows: {len(ledger):,}\n")
         f.write(f"Cost scenario: {COST_SCENARIO_NAME}\n")
         f.write(f"Context result rows: {len(results):,}\n")
@@ -327,6 +349,22 @@ def main() -> None:
     print(f"Top:    {output_top}")
     print(f"Report: {output_report}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy horizon context optimizer."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_horizon_context_optimizer(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":

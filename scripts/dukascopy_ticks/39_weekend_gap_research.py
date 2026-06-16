@@ -7,23 +7,42 @@ Purpose:
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-CONTEXT_LEDGER = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_context_replay"
-    / "trade_ledgers" / "horizon_context_replay_ledger_latest.parquet"
-)
+def build_context_ledger(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_context_replay"
+        / f"symbol={symbol}"
+        / "trade_ledgers"
+        / "horizon_context_replay_ledger_latest.parquet"
+    )
 
-HORIZON_FEATURE_ROOT = (
-    QUANT_LAB / "data" / "processed" / "dukascopy_horizon_features" / f"symbol={SYMBOL}"
-)
+def build_horizon_feature_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "processed"
+        / "dukascopy_horizon_features"
+        / f"symbol={symbol}"
+    )
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_weekend_gap_research"
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_weekend_gap_research"
+        / f"symbol={symbol}"
+    )
 
 TARGET_REPLAY_FILTER = "session=asia | day_of_week=Monday"
 MIN_TRADES = 5_000
@@ -35,18 +54,22 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "gap_tables",
-        OUTPUT_ROOT / "performance_tables",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "gap_tables",
+        output_root / "performance_tables",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
 
-def discover_horizon_files() -> list[Path]:
-    return sorted(HORIZON_FEATURE_ROOT.rglob("*.parquet")) if HORIZON_FEATURE_ROOT.exists() else []
+def discover_horizon_files(horizon_feature_root: Path) -> list[Path]:
+    return (
+        sorted(horizon_feature_root.rglob("*.parquet"))
+        if horizon_feature_root.exists()
+        else []
+    )
 
 
 def evaluate_returns(returns: pd.Series) -> dict:
@@ -82,8 +105,10 @@ def evaluate_returns(returns: pd.Series) -> dict:
     }
 
 
-def build_daily_gap_table() -> pd.DataFrame:
-    files = discover_horizon_files()
+def build_daily_gap_table(
+    horizon_feature_root: Path,
+) -> pd.DataFrame:
+    files = discover_horizon_files(horizon_feature_root)
 
     rows = []
 
@@ -233,28 +258,36 @@ def analyse_gap_performance(ledger: pd.DataFrame, group_cols: list[str]) -> pd.D
     return pd.DataFrame(rows)
 
 
-def main() -> None:
+def run_weekend_gap_research(
+    symbol: str = DEFAULT_SYMBOL,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    context_ledger = build_context_ledger(symbol)
+    horizon_feature_root = build_horizon_feature_root(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 39 - WEEKEND GAP RESEARCH")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:          {SYMBOL}")
-    print(f"Context ledger:  {CONTEXT_LEDGER}")
-    print(f"Horizon root:    {HORIZON_FEATURE_ROOT}")
-    print(f"Output root:     {OUTPUT_ROOT}")
+    print(f"Symbol:          {symbol}")
+    print(f"Context ledger:  {context_ledger}")
+    print(f"Horizon root:    {horizon_feature_root}")
+    print(f"Output root:     {output_root}")
     print("-" * 90)
 
-    if not CONTEXT_LEDGER.exists():
+    if not context_ledger.exists():
         print("[STOP] Missing Script 35 context replay ledger.")
         return
 
-    daily_gap = build_daily_gap_table()
+    daily_gap = build_daily_gap_table(horizon_feature_root)
 
     if daily_gap.empty:
         print("[STOP] Could not build daily gap table.")
         return
 
-    ledger = pd.read_parquet(CONTEXT_LEDGER)
+    ledger = pd.read_parquet(context_ledger)
 
     print(f"Loaded context replay ledger rows: {len(ledger):,}")
 
@@ -301,13 +334,13 @@ def main() -> None:
     by_year_gap_size = analyse_gap_performance(monday_asia, ["year", "monday_gap_size"])
 
     # Save outputs
-    daily_gap_path = OUTPUT_ROOT / "gap_tables" / "daily_open_gap_table_latest.csv"
-    monday_gap_path = OUTPUT_ROOT / "gap_tables" / "monday_open_gap_table_latest.csv"
-    by_gap_size_path = OUTPUT_ROOT / "performance_tables" / "monday_asia_by_gap_size_latest.csv"
-    by_gap_direction_path = OUTPUT_ROOT / "performance_tables" / "monday_asia_by_gap_direction_latest.csv"
-    by_gap_size_direction_path = OUTPUT_ROOT / "performance_tables" / "monday_asia_by_gap_size_direction_latest.csv"
-    by_year_gap_size_path = OUTPUT_ROOT / "performance_tables" / "monday_asia_by_year_gap_size_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "weekend_gap_research_report_latest.txt"
+    daily_gap_path = output_root / "gap_tables" / "daily_open_gap_table_latest.csv"
+    monday_gap_path = output_root / "gap_tables" / "monday_open_gap_table_latest.csv"
+    by_gap_size_path = output_root / "performance_tables" / "monday_asia_by_gap_size_latest.csv"
+    by_gap_direction_path = output_root / "performance_tables" / "monday_asia_by_gap_direction_latest.csv"
+    by_gap_size_direction_path = output_root / "performance_tables" / "monday_asia_by_gap_size_direction_latest.csv"
+    by_year_gap_size_path = output_root / "performance_tables" / "monday_asia_by_year_gap_size_latest.csv"
+    report_path = output_root / "reports" / "weekend_gap_research_report_latest.txt"
 
     daily_gap.to_csv(daily_gap_path, index=False)
     monday_only_gaps.to_csv(monday_gap_path, index=False)
@@ -319,7 +352,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY WEEKEND GAP RESEARCH REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Daily gap rows: {len(daily_gap):,}\n")
         f.write(f"Monday gap rows: {len(monday_only_gaps):,}\n")
         f.write(f"Monday Asia replay rows: {len(monday_asia):,}\n\n")
@@ -369,6 +402,22 @@ def main() -> None:
     print("[DONE] Weekend gap research complete.")
     print(f"Report: {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy weekend gap research."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_weekend_gap_research(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":

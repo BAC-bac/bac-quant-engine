@@ -6,24 +6,46 @@ Purpose:
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-LEDGER_PATH = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_candidate_replay"
-    / "trade_ledgers" / "candidate_replay_ledger_latest.parquet"
-)
+def build_ledger_path(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_candidate_replay"
+        / f"symbol={symbol}"
+        / "trade_ledgers"
+        / "candidate_replay_ledger_latest.parquet"
+    )
 
-CONTEXT_PATH = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_context_optimizer"
-    / "top_contexts" / "top_horizon_contexts_latest.csv"
-)
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_context_replay"
+def build_context_path(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_context_optimizer"
+        / f"symbol={symbol}"
+        / "top_contexts"
+        / "top_horizon_contexts_latest.csv"
+    )
+
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_context_replay"
+        / f"symbol={symbol}"
+    )
 
 TOP_N_CONTEXTS = 20
 
@@ -40,13 +62,13 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "trade_ledgers",
-        OUTPUT_ROOT / "equity_curves",
-        OUTPUT_ROOT / "summaries",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "trade_ledgers",
+        output_root / "equity_curves",
+        output_root / "summaries",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -149,27 +171,35 @@ def build_equity_curve(df: pd.DataFrame, replay_id: str) -> pd.DataFrame:
     ]
 
 
-def main() -> None:
+def run_horizon_context_replay(
+    symbol: str = DEFAULT_SYMBOL,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    ledger_path = build_ledger_path(symbol)
+    context_path = build_context_path(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 35 - HORIZON CONTEXT REPLAY")
 
-    ensure_dirs()
+    ensure_dirs(output_root)()
 
-    print(f"Symbol:       {SYMBOL}")
-    print(f"Ledger:       {LEDGER_PATH}")
-    print(f"Contexts:     {CONTEXT_PATH}")
-    print(f"Output root:  {OUTPUT_ROOT}")
+    print(f"Symbol:       {symbol}")
+    print(f"Ledger:       {ledger_path}")
+    print(f"Contexts:     {context_path}")
+    print(f"Output root:  {output_root}")
     print("-" * 90)
 
-    if not LEDGER_PATH.exists():
+    if not ledger_path.exists():
         print("[STOP] Missing horizon replay ledger.")
         return
 
-    if not CONTEXT_PATH.exists():
+    if not context_path.exists():
         print("[STOP] Missing Script 34 context file.")
         return
 
-    ledger = pd.read_parquet(LEDGER_PATH)
-    contexts = pd.read_csv(CONTEXT_PATH)
+    ledger = pd.read_parquet(ledger_path)
+    contexts = pd.read_csv(context_path)
 
     print(f"Loaded ledger rows:   {len(ledger):,}")
     print(f"Loaded context rows:  {len(contexts):,}")
@@ -310,16 +340,16 @@ def main() -> None:
     monthly_df = pd.concat(monthly_rows, ignore_index=True)
     yearly_df = pd.concat(yearly_rows, ignore_index=True)
 
-    summary_path = OUTPUT_ROOT / "summaries" / "horizon_context_replay_summary_latest.csv"
-    ledger_path = OUTPUT_ROOT / "trade_ledgers" / "horizon_context_replay_ledger_latest.parquet"
-    ledger_sample_path = OUTPUT_ROOT / "trade_ledgers" / "horizon_context_replay_ledger_sample_latest.csv"
-    equity_path = OUTPUT_ROOT / "equity_curves" / "horizon_context_equity_curves_latest.csv"
-    monthly_path = OUTPUT_ROOT / "summaries" / "horizon_context_monthly_returns_latest.csv"
-    yearly_path = OUTPUT_ROOT / "summaries" / "horizon_context_yearly_returns_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "horizon_context_replay_report_latest.txt"
+    summary_path = output_root / "summaries" / "horizon_context_replay_summary_latest.csv"
+    output_ledger_path = output_root / "trade_ledgers" / "horizon_context_replay_ledger_latest.parquet"
+    ledger_sample_path = output_root / "trade_ledgers" / "horizon_context_replay_ledger_sample_latest.csv"
+    equity_path = output_root / "equity_curves" / "horizon_context_equity_curves_latest.csv"
+    monthly_path = output_root / "summaries" / "horizon_context_monthly_returns_latest.csv"
+    yearly_path = output_root / "summaries" / "horizon_context_yearly_returns_latest.csv"
+    report_path = output_root / "reports" / "horizon_context_replay_report_latest.txt"
 
     summary.to_csv(summary_path, index=False)
-    replay_ledger.to_parquet(ledger_path, index=False)
+    replay_ledger.to_parquet(output_ledger_path, index=False)
     replay_ledger.head(250_000).to_csv(ledger_sample_path, index=False)
     equity.to_csv(equity_path, index=False)
     monthly_df.to_csv(monthly_path, index=False)
@@ -328,7 +358,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY HORIZON CONTEXT REPLAY REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Ledger rows loaded: {len(ledger):,}\n")
         f.write(f"Contexts selected: {len(contexts)}\n")
         f.write(f"Replay ledgers generated: {len(summary):,}\n")
@@ -376,6 +406,22 @@ def main() -> None:
     print(f"Yearly:         {yearly_path}")
     print(f"Report:         {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy horizon context replay."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_horizon_context_replay(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":

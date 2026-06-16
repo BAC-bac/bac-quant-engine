@@ -12,24 +12,44 @@ Compares:
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-CONTEXT_LEDGER = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_context_replay"
-    / "trade_ledgers" / "horizon_context_replay_ledger_latest.parquet"
-)
+def build_context_ledger(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_context_replay"
+        / f"symbol={symbol}"
+        / "trade_ledgers"
+        / "horizon_context_replay_ledger_latest.parquet"
+    )
 
-DAILY_GAP_PATH = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_weekend_gap_research"
-    / "gap_tables" / "daily_open_gap_table_latest.csv"
-)
+def build_daily_gap_path(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_weekend_gap_research"
+        / f"symbol={symbol}"
+        / "gap_tables"
+        / "daily_open_gap_table_latest.csv"
+    )
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_conditional_context_engine"
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_conditional_context_engine"
+        / f"symbol={symbol}"
+    )
 
 MIN_TRADES = 5_000
 
@@ -40,12 +60,12 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "conditional_results",
-        OUTPUT_ROOT / "rankings",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "conditional_results",
+        output_root / "rankings",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -190,27 +210,35 @@ def score_results(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def main() -> None:
+def run_conditional_context_engine(
+    symbol: str = DEFAULT_SYMBOL,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    context_ledger = build_context_ledger(symbol)
+    daily_gap_path = build_daily_gap_path(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 40 - CONDITIONAL CONTEXT ENGINE")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:         {SYMBOL}")
-    print(f"Context ledger: {CONTEXT_LEDGER}")
-    print(f"Daily gaps:     {DAILY_GAP_PATH}")
-    print(f"Output root:    {OUTPUT_ROOT}")
+    print(f"Symbol:         {symbol}")
+    print(f"Context ledger: {context_ledger}")
+    print(f"Daily gaps:     {daily_gap_path}")
+    print(f"Output root:    {output_root}")
     print("-" * 90)
 
-    if not CONTEXT_LEDGER.exists():
+    if not context_ledger.exists():
         print("[STOP] Missing Script 35 context replay ledger.")
         return
 
-    if not DAILY_GAP_PATH.exists():
+    if not daily_gap_path.exists():
         print("[STOP] Missing Script 39 daily gap table.")
         return
 
-    ledger = pd.read_parquet(CONTEXT_LEDGER)
-    gaps = pd.read_csv(DAILY_GAP_PATH)
+    ledger = pd.read_parquet(context_ledger)
+    gaps = pd.read_csv(daily_gap_path)
 
     print(f"Loaded ledger rows: {len(ledger):,}")
     print(f"Loaded gap rows:    {len(gaps):,}")
@@ -296,9 +324,9 @@ def main() -> None:
 
     ranked = score_results(results)
 
-    output_all = OUTPUT_ROOT / "conditional_results" / "conditional_context_results_latest.csv"
-    output_ranked = OUTPUT_ROOT / "rankings" / "conditional_context_ranked_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "conditional_context_report_latest.txt"
+    output_all = (output_root / "conditional_results" / "conditional_context_results_latest.csv")
+    output_ranked = (output_root / "rankings" / "conditional_context_ranked_latest.csv")
+    report_path = (output_root / "reports" / "conditional_context_report_latest.txt")
 
     results.to_csv(output_all, index=False)
     ranked.to_csv(output_ranked, index=False)
@@ -306,7 +334,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY CONDITIONAL CONTEXT ENGINE REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Monday Asia candidate rows: {len(monday_asia):,}\n")
         f.write(f"Conditional rows: {len(results):,}\n\n")
 
@@ -349,6 +377,22 @@ def main() -> None:
     print(f"Ranked: {output_ranked}")
     print(f"Report: {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy conditional context engine."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_conditional_context_engine(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":

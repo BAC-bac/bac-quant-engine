@@ -15,19 +15,34 @@ Output:
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-INPUT_LEDGER = (
-    QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_context_replay"
-    / "trade_ledgers" / "horizon_context_replay_ledger_latest.parquet"
-)
+def build_input_ledger(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_context_replay"
+        / f"symbol={symbol}"
+        / "trade_ledgers"
+        / "horizon_context_replay_ledger_latest.parquet"
+    )
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_walk_forward_validation"
+
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_walk_forward_validation"
+        / f"symbol={symbol}"
+    )
 
 MIN_TRADES_PER_SPLIT = 5_000
 
@@ -43,12 +58,12 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "walk_forward_results",
-        OUTPUT_ROOT / "rankings",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "walk_forward_results",
+        output_root / "rankings",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -106,21 +121,28 @@ def classify_walk_forward(row: pd.Series) -> str:
     return "walk_forward_reject"
 
 
-def main() -> None:
+def run_walk_forward_validation(
+    symbol: str = DEFAULT_SYMBOL,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    input_ledger = build_input_ledger(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 37 - WALK FORWARD VALIDATION ENGINE")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:       {SYMBOL}")
-    print(f"Input ledger: {INPUT_LEDGER}")
-    print(f"Output root:  {OUTPUT_ROOT}")
+    print(f"Symbol:       {symbol}")
+    print(f"Input ledger: {input_ledger}")
+    print(f"Output root:  {output_root}")
     print("-" * 90)
 
-    if not INPUT_LEDGER.exists():
+    if not input_ledger.exists():
         print("[STOP] Missing Script 35 context replay ledger.")
         return
 
-    ledger = pd.read_parquet(INPUT_LEDGER)
+    ledger = pd.read_parquet(input_ledger)
 
     print(f"Loaded ledger rows: {len(ledger):,}")
 
@@ -253,9 +275,9 @@ def main() -> None:
     summary = summary.sort_values("wf_score", ascending=False)
     summary.insert(0, "wf_rank", range(1, len(summary) + 1))
 
-    split_path = OUTPUT_ROOT / "walk_forward_results" / "walk_forward_split_results_latest.csv"
-    summary_path = OUTPUT_ROOT / "rankings" / "walk_forward_ranked_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "walk_forward_validation_report_latest.txt"
+    split_path = output_root / "walk_forward_results" / "walk_forward_split_results_latest.csv"
+    summary_path = output_root / "rankings" / "walk_forward_ranked_latest.csv"
+    report_path = output_root / "reports" / "walk_forward_validation_report_latest.txt"
 
     split_df.to_csv(split_path, index=False)
     summary.to_csv(summary_path, index=False)
@@ -263,7 +285,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY WALK FORWARD VALIDATION REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Input ledger rows: {len(ledger):,}\n")
         f.write(f"Walk-forward split rows: {len(split_df):,}\n")
         f.write(f"Candidates tested: {len(summary):,}\n\n")
@@ -330,6 +352,22 @@ def main() -> None:
     print(f"Ranked:        {summary_path}")
     print(f"Report:        {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy walk forward validation."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_walk_forward_validation(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":

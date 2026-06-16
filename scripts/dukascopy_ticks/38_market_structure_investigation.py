@@ -3,18 +3,31 @@ BACQE DUKASCOPY 38 - MARKET STRUCTURE INVESTIGATION
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-INPUT_ROOT = (
-    QUANT_LAB / "data" / "processed" / "dukascopy_horizon_features" / f"symbol={SYMBOL}"
-)
+def build_input_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "processed"
+        / "dukascopy_horizon_features"
+        / f"symbol={symbol}"
+    )
 
-OUTPUT_ROOT = QUANT_LAB / "data" / "analysis" / "dukascopy_market_structure_investigation"
+def build_output_root(symbol: str) -> Path:
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_market_structure_investigation"
+        / f"symbol={symbol}"
+    )
 
 TARGET = "future_return_1000"
 FEATURE = "mid_return_1"
@@ -28,19 +41,19 @@ def banner(title: str) -> None:
     print("=" * 90)
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "structure_tables",
-        OUTPUT_ROOT / "continuation_tables",
-        OUTPUT_ROOT / "gap_tables",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "structure_tables",
+        output_root / "continuation_tables",
+        output_root / "gap_tables",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
 
-def discover_files() -> list[Path]:
-    return sorted(INPUT_ROOT.rglob("*.parquet")) if INPUT_ROOT.exists() else []
+def discover_files(input_root: Path) -> list[Path]:
+    return sorted(input_root.rglob("*.parquet")) if input_root.exists() else []
 
 
 def assign_session(hour: int) -> str:
@@ -144,19 +157,26 @@ def calculate_daily_open_gap_proxy(df: pd.DataFrame) -> pd.DataFrame:
     return daily
 
 
-def main() -> None:
+def run_market_structure_investigation(
+    symbol: str = DEFAULT_SYMBOL,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    input_root = build_input_root(symbol)
+    output_root = build_output_root(symbol)
+
     banner("BACQE DUKASCOPY 38 - MARKET STRUCTURE INVESTIGATION")
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    print(f"Symbol:      {SYMBOL}")
-    print(f"Input root:  {INPUT_ROOT}")
-    print(f"Output root: {OUTPUT_ROOT}")
+    print(f"Symbol:      {symbol}")
+    print(f"Input root:  {input_root}")
+    print(f"Output root: {output_root}")
     print(f"Feature:     {FEATURE}")
     print(f"Target:      {TARGET}")
     print("-" * 90)
 
-    files = discover_files()
+    files = discover_files(input_root)
     print(f"Files discovered: {len(files)}")
     print("-" * 90)
 
@@ -234,15 +254,15 @@ def main() -> None:
     monday_asia_by_hour = evaluate_group(monday_asia, ["hour"]) if not monday_asia.empty else pd.DataFrame()
 
     # Save outputs
-    by_hour_path = OUTPUT_ROOT / "structure_tables" / "structure_by_hour_latest.csv"
-    by_day_path = OUTPUT_ROOT / "structure_tables" / "structure_by_day_latest.csv"
-    by_session_path = OUTPUT_ROOT / "structure_tables" / "structure_by_session_latest.csv"
-    by_session_day_path = OUTPUT_ROOT / "structure_tables" / "structure_by_session_day_latest.csv"
-    by_day_hour_path = OUTPUT_ROOT / "continuation_tables" / "continuation_by_day_hour_latest.csv"
-    by_year_day_path = OUTPUT_ROOT / "continuation_tables" / "continuation_by_year_day_latest.csv"
-    gap_by_day_path = OUTPUT_ROOT / "gap_tables" / "open_gap_by_day_latest.csv"
-    monday_asia_path = OUTPUT_ROOT / "continuation_tables" / "monday_asia_by_hour_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "market_structure_investigation_report_latest.txt"
+    by_hour_path = output_root / "structure_tables" / "structure_by_hour_latest.csv"
+    by_day_path = output_root / "structure_tables" / "structure_by_day_latest.csv"
+    by_session_path = output_root / "structure_tables" / "structure_by_session_latest.csv"
+    by_session_day_path = output_root / "structure_tables" / "structure_by_session_day_latest.csv"
+    by_day_hour_path = output_root / "continuation_tables" / "continuation_by_day_hour_latest.csv"
+    by_year_day_path = output_root / "continuation_tables" / "continuation_by_year_day_latest.csv"
+    gap_by_day_path = output_root / "gap_tables" / "open_gap_by_day_latest.csv"
+    monday_asia_path = output_root / "continuation_tables" / "monday_asia_by_hour_latest.csv"
+    report_path = output_root / "reports" / "market_structure_investigation_report_latest.txt"
 
     by_hour.to_csv(by_hour_path, index=False)
     by_day.to_csv(by_day_path, index=False)
@@ -261,7 +281,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY MARKET STRUCTURE INVESTIGATION REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Files processed: {len(files)}\n")
         f.write(f"Combined sampled rows: {len(data):,}\n")
         f.write(f"Feature: {FEATURE}\n")
@@ -353,6 +373,22 @@ def main() -> None:
     print("[DONE] Market structure investigation complete.")
     print(f"Report: {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy market structure investigation."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_market_structure_investigation(
+        symbol=args.symbol,
+    )
 
 
 if __name__ == "__main__":
