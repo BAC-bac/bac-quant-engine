@@ -16,7 +16,7 @@ This script verifies:
 
 from pathlib import Path
 from datetime import datetime, timedelta
-
+import argparse
 import pandas as pd
 
 
@@ -27,9 +27,9 @@ TICK_BAR_ROOT = DATA_ROOT / "processed" / "dukascopy_tick_bars"
 TIB_ROOT = DATA_ROOT / "processed" / "dukascopy_tick_imbalance_bars"
 REPORT_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks" / "month_audits"
 
-SYMBOL = "EURUSD"
-START_DATE = "2023-01-01"
-END_DATE = "2025-12-31"
+DEFAULT_SYMBOL = "EURUSD"
+DEFAULT_START_DATE = "2023-01-01"
+DEFAULT_END_DATE = "2025-12-31"
 
 TICK_SIZES = [100, 250, 500, 1000]
 IMBALANCE_THRESHOLDS = [25, 50, 100]
@@ -89,10 +89,10 @@ def safe_parquet_row_count(path: Path) -> tuple[str, int, str]:
         return "read_error", 0, repr(exc)
 
 
-def audit_day(dt: datetime) -> list[dict]:
+def audit_day(symbol: str, dt: datetime) -> list[dict]:
     rows = []
 
-    tick_path = processed_tick_path(SYMBOL, dt)
+    tick_path = processed_tick_path(symbol, dt)
     status, count, error = safe_parquet_row_count(tick_path)
 
     rows.append({
@@ -106,7 +106,7 @@ def audit_day(dt: datetime) -> list[dict]:
     })
 
     for tick_size in TICK_SIZES:
-        path = tick_bar_path(SYMBOL, dt, tick_size)
+        path = tick_bar_path(symbol, dt, tick_size)
         status, count, error = safe_parquet_row_count(path)
 
         rows.append({
@@ -120,7 +120,7 @@ def audit_day(dt: datetime) -> list[dict]:
         })
 
     for threshold in IMBALANCE_THRESHOLDS:
-        path = tib_path(SYMBOL, dt, threshold)
+        path = tib_path(symbol, dt, threshold)
         status, count, error = safe_parquet_row_count(path)
 
         rows.append({
@@ -136,21 +136,27 @@ def audit_day(dt: datetime) -> list[dict]:
     return rows
 
 
-def main() -> None:
-    start = datetime.strptime(START_DATE, "%Y-%m-%d")
-    end = datetime.strptime(END_DATE, "%Y-%m-%d")
+def run_range_output_audit(
+    symbol: str = DEFAULT_SYMBOL,
+    start_date: str = DEFAULT_START_DATE,
+    end_date: str = DEFAULT_END_DATE,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
 
     print("=" * 90)
     print("BACQE DUKASCOPY 11 - AUDIT MONTH OUTPUTS")
     print("=" * 90)
-    print(f"Symbol:     {SYMBOL}")
-    print(f"Date range: {START_DATE} to {END_DATE}")
+    print(f"Symbol:     {symbol}")
+    print(f"Date range: {start_date} to {end_date}")
     print("-" * 90)
 
     rows = []
 
     for dt in date_range(start, end):
-        day_rows = audit_day(dt)
+        day_rows = audit_day(symbol, dt)
         rows.extend(day_rows)
 
         day_df = pd.DataFrame(day_rows)
@@ -177,7 +183,7 @@ def main() -> None:
 
     audit_path = (
         REPORT_ROOT
-        / f"{SYMBOL}_{START_DATE}_to_{END_DATE}_month_output_audit.csv"
+        / f"{symbol}_{start_date}_to_{end_date}_month_output_audit.csv"
     )
 
     audit_df.to_csv(audit_path, index=False)
@@ -211,6 +217,27 @@ def main() -> None:
     print("-" * 90)
     print(f"Audit report: {audit_path}")
     print("[DONE] Dukascopy month output audit complete.")
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Audit Dukascopy processed tick, tick bar, and TIB outputs."
+    )
+
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    parser.add_argument("--start-date", default=DEFAULT_START_DATE)
+    parser.add_argument("--end-date", default=DEFAULT_END_DATE)
+
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_range_output_audit(
+        symbol=args.symbol,
+        start_date=args.start_date,
+        end_date=args.end_date,
+    )
 
 
 if __name__ == "__main__":

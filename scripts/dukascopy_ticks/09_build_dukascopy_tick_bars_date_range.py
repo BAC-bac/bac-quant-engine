@@ -17,7 +17,7 @@ Also saves:
 
 from pathlib import Path
 from datetime import datetime, timedelta
-
+import argparse
 import pandas as pd
 
 
@@ -31,9 +31,9 @@ TICK_ROOT = DATA_ROOT / "processed" / "dukascopy_ticks"
 BAR_ROOT = DATA_ROOT / "processed" / "dukascopy_tick_bars"
 REPORT_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks" / "tick_bar_reports"
 
-SYMBOL = "EURUSD"
-START_DATE = "2023-01-01"
-END_DATE = "2025-12-31"
+DEFAULT_SYMBOL = "EURUSD"
+DEFAULT_START_DATE = "2023-01-01"
+DEFAULT_END_DATE = "2025-12-31"
 
 TICK_SIZES = [100, 250, 500, 1000]
 
@@ -230,22 +230,28 @@ def build_report_row(
 # MAIN
 # =============================================================================
 
-def main() -> None:
-    start = datetime.strptime(START_DATE, "%Y-%m-%d")
-    end = datetime.strptime(END_DATE, "%Y-%m-%d")
+def run_tick_bar_builder(
+    symbol: str = DEFAULT_SYMBOL,
+    start_date: str = DEFAULT_START_DATE,
+    end_date: str = DEFAULT_END_DATE,
+) -> None:
+    symbol = symbol.upper().strip()
+
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
 
     print("=" * 90)
     print("BACQE DUKASCOPY 09 - BUILD FIXED TICK BARS FOR DATE RANGE")
     print("=" * 90)
-    print(f"Symbol:     {SYMBOL}")
-    print(f"Date range: {START_DATE} to {END_DATE}")
+    print(f"Symbol:     {symbol}")
+    print(f"Date range: {start_date} to {end_date}")
     print(f"Tick sizes: {TICK_SIZES}")
     print("-" * 90)
 
     report_rows = []
 
     for dt in date_range(start, end):
-        in_path = input_tick_path(SYMBOL, dt)
+        in_path = input_tick_path(symbol, dt)
 
         print(f"\n[DATE] {dt.strftime('%Y-%m-%d')}")
 
@@ -280,7 +286,7 @@ def main() -> None:
         for tick_size in TICK_SIZES:
             bars = build_tick_bars(df, tick_size)
 
-            out_path = output_bar_path(SYMBOL, dt, tick_size)
+            out_path = output_bar_path(symbol, dt, tick_size)
             out_path.parent.mkdir(parents=True, exist_ok=True)
 
             bars.to_parquet(out_path, index=False)
@@ -306,7 +312,7 @@ def main() -> None:
     REPORT_ROOT.mkdir(parents=True, exist_ok=True)
 
     report_df = pd.DataFrame(report_rows)
-    out_report = report_path(SYMBOL, start, end)
+    out_report = report_path(symbol, start, end)
     report_df.to_csv(out_report, index=False)
 
     processed_rows = report_df[report_df["status"] == "processed"]
@@ -321,6 +327,39 @@ def main() -> None:
     print(f"Total bars:     {int(total_bars):,}")
     print(f"Report:         {out_report}")
     print("[DONE] Dukascopy date-range fixed tick bars built successfully.")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build Dukascopy fixed tick bars for a date range."
+    )
+
+    parser.add_argument(
+        "--symbol",
+        default=DEFAULT_SYMBOL,
+    )
+
+    parser.add_argument(
+        "--start-date",
+        default=DEFAULT_START_DATE,
+    )
+
+    parser.add_argument(
+        "--end-date",
+        default=DEFAULT_END_DATE,
+    )
+
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    run_tick_bar_builder(
+        symbol=args.symbol,
+        start_date=args.start_date,
+        end_date=args.end_date,
+    )
 
 
 if __name__ == "__main__":
