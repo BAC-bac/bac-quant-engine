@@ -30,7 +30,7 @@ def build_input_path(symbol: str) -> Path:
         / "dukascopy_feature_discovery"
         / f"symbol={symbol}"
         / "feature_scores"
-        / "feature_scores_latest.csv"
+        / f"{symbol}_feature_scores_latest.csv"
     )
 
 
