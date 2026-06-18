@@ -5,6 +5,7 @@ dukascopy_research:
   symbols:
     - EURUSD
     - GBPUSD
+    - USDJPY
 
   date_range:
     start: "2023-01-01"
