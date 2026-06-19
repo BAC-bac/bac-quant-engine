@@ -3,47 +3,55 @@ import itertools
 
 import numpy as np
 import pandas as pd
+import argparse
 
 
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-SYMBOL = "EURUSD"
+DEFAULT_SYMBOL = "EURUSD"
 FEATURE = "mid_return_1"
 TARGET = "future_return_1000"
 SIDE = "long"
 
-SYMBOL_LEDGER_PATH = (
-    QUANT_LAB
-    / "data"
-    / "analysis"
-    / "dukascopy_horizon_candidate_replay"
-    / f"symbol={SYMBOL}"
-    / "trade_ledgers"
-    / "candidate_replay_ledger_latest.parquet"
-)
+def build_ledger_path(symbol: str) -> Path:
 
-LEGACY_LEDGER_PATH = (
-    QUANT_LAB
-    / "data"
-    / "analysis"
-    / "dukascopy_horizon_candidate_replay"
-    / "trade_ledgers"
-    / "candidate_replay_ledger_latest.parquet"
-)
+    symbol_path = (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_candidate_replay"
+        / f"symbol={symbol}"
+        / "trade_ledgers"
+        / "candidate_replay_ledger_latest.parquet"
+    )
 
-LEDGER_PATH = (
-    SYMBOL_LEDGER_PATH
-    if SYMBOL_LEDGER_PATH.exists()
-    else LEGACY_LEDGER_PATH
-)
+    legacy_path = (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_horizon_candidate_replay"
+        / "trade_ledgers"
+        / "candidate_replay_ledger_latest.parquet"
+    )
 
-OUTPUT_ROOT = (
-    QUANT_LAB
-    / "data"
-    / "analysis"
-    / "dukascopy_context_conditioning_research"
-    / f"symbol={SYMBOL}"
-)
+    if symbol_path.exists():
+        return symbol_path
+
+    if symbol == "EURUSD" and legacy_path.exists():
+        return legacy_path
+
+    return symbol_path
+
+
+def build_output_root(symbol: str) -> Path:
+
+    return (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_context_conditioning_research"
+        / f"symbol={symbol}"
+    )
 
 MIN_TRADES = 10_000
 
@@ -82,11 +90,11 @@ CONTEXT_GROUPS = [
 ]
 
 
-def ensure_dirs() -> None:
+def ensure_dirs(output_root: Path) -> None:
     for folder in [
-        OUTPUT_ROOT,
-        OUTPUT_ROOT / "tables",
-        OUTPUT_ROOT / "reports",
+        output_root,
+        output_root / "tables",
+        output_root / "reports",
     ]:
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -206,7 +214,7 @@ def context_label(group_cols: list[str], keys) -> str:
     return " | ".join(parts)
 
 
-def run_context_tests(df: pd.DataFrame) -> pd.DataFrame:
+def run_context_tests(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     rows = []
 
     for group_cols in CONTEXT_GROUPS:
@@ -242,7 +250,7 @@ def run_context_tests(df: pd.DataFrame) -> pd.DataFrame:
                 net_stats.update(net_period)
 
                 rows.append({
-                    "symbol": SYMBOL,
+                    "symbol": symbol,
                     "feature": FEATURE,
                     "target": TARGET,
                     "side": SIDE,
@@ -307,25 +315,30 @@ def score_results(results: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def main() -> None:
+def run_context_conditioning(symbol: str = DEFAULT_SYMBOL) -> None:
+    symbol = symbol.upper().strip()
+
+    ledger_path = build_ledger_path(symbol)
+    output_root = build_output_root(symbol)
+
     print("=" * 90)
     print("BACQE DUKASCOPY 57 - CONTEXT CONDITIONING RESEARCH")
     print("=" * 90)
-    print(f"Symbol:  {SYMBOL}")
+    print(f"Symbol:  {symbol}")
     print(f"Feature: {FEATURE}")
     print(f"Target:  {TARGET}")
     print(f"Side:    {SIDE}")
-    print(f"Ledger:  {LEDGER_PATH}")
-    print(f"Output:  {OUTPUT_ROOT}")
+    print(f"Ledger:  {ledger_path}")
+    print(f"Output:  {output_root}")
     print("-" * 90)
 
-    ensure_dirs()
+    ensure_dirs(output_root)
 
-    if not LEDGER_PATH.exists():
-        print(f"[STOP] Missing ledger: {LEDGER_PATH}")
+    if not ledger_path.exists():
+        print(f"[STOP] Missing ledger: {ledger_path}")
         return
 
-    ledger = pd.read_parquet(LEDGER_PATH)
+    ledger = pd.read_parquet(ledger_path)
     print(f"Loaded ledger rows: {len(ledger):,}")
 
     candidate = prepare_candidate_ledger(ledger)
@@ -335,7 +348,7 @@ def main() -> None:
         print("[STOP] No matching candidate rows.")
         return
 
-    results = run_context_tests(candidate)
+    results = run_context_tests(candidate, symbol)
 
     if results.empty:
         print("[STOP] No context results generated.")
@@ -343,9 +356,9 @@ def main() -> None:
 
     ranked = score_results(results)
 
-    output_results = OUTPUT_ROOT / "tables" / "context_conditioning_results_latest.csv"
-    output_ranked = OUTPUT_ROOT / "tables" / "context_conditioning_ranked_latest.csv"
-    report_path = OUTPUT_ROOT / "reports" / "context_conditioning_report_latest.txt"
+    output_results = output_root / "tables" / "context_conditioning_results_latest.csv"
+    output_ranked = output_root / "tables" / "context_conditioning_ranked_latest.csv"
+    report_path = output_root / "reports" / "context_conditioning_report_latest.txt"
 
     results.to_csv(output_results, index=False)
     ranked.to_csv(output_ranked, index=False)
@@ -353,7 +366,7 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("BACQE DUKASCOPY CONTEXT CONDITIONING RESEARCH REPORT\n")
         f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {SYMBOL}\n")
+        f.write(f"Symbol: {symbol}\n")
         f.write(f"Feature: {FEATURE}\n")
         f.write(f"Target: {TARGET}\n")
         f.write(f"Side: {SIDE}\n")
@@ -407,6 +420,19 @@ def main() -> None:
     print(f"Ranked:  {output_ranked}")
     print(f"Report:  {report_path}")
     print("=" * 90)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Dukascopy context conditioning research."
+    )
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    run_context_conditioning(symbol=args.symbol)
 
 
 if __name__ == "__main__":
