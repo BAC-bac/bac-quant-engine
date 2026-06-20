@@ -9,9 +9,13 @@ import argparse
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
 DEFAULT_SYMBOL = "EURUSD"
-FEATURE = "mid_return_1"
-TARGET = "future_return_1000"
-SIDE = "long"
+DEFAULT_FEATURE = "mid_return_1"
+DEFAULT_TARGET = "future_return_1000"
+DEFAULT_SIDE = "long"
+
+
+def candidate_slug(feature: str, target: str, side: str) -> str:
+    return f"feature={feature}__target={target}__side={side}"
 
 def build_ledger_path(symbol: str) -> Path:
 
@@ -43,14 +47,19 @@ def build_ledger_path(symbol: str) -> Path:
     return symbol_path
 
 
-def build_output_root(symbol: str) -> Path:
-
+def build_output_root(
+    symbol: str,
+    feature: str,
+    target: str,
+    side: str,
+) -> Path:
     return (
         QUANT_LAB
         / "data"
         / "analysis"
         / "dukascopy_context_conditioning_research"
         / f"symbol={symbol}"
+        / candidate_slug(feature, target, side)
     )
 
 MIN_TRADES = 10_000
@@ -152,13 +161,16 @@ def add_period_rates(df: pd.DataFrame, return_col: str) -> dict:
     }
 
 
-def prepare_candidate_ledger(df: pd.DataFrame) -> pd.DataFrame:
+def prepare_candidate_ledger(
+    df: pd.DataFrame,
+    feature: str,
+    target: str,
+    side: str,
+) -> pd.DataFrame:
     df = df.copy()
 
     df = df[
-        (df["feature"].astype(str) == FEATURE)
-        & (df["target"].astype(str) == TARGET)
-        & (df["side"].astype(str) == SIDE)
+        (df["feature"].astype(str) == feature) & (df["target"].astype(str) == target) & (df["side"].astype(str) == side)
     ].copy()
 
     if df.empty:
@@ -214,7 +226,13 @@ def context_label(group_cols: list[str], keys) -> str:
     return " | ".join(parts)
 
 
-def run_context_tests(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+def run_context_tests(
+    df: pd.DataFrame,
+    symbol: str,
+    feature: str,
+    target: str,
+    side: str,
+) -> pd.DataFrame:
     rows = []
 
     for group_cols in CONTEXT_GROUPS:
@@ -251,9 +269,9 @@ def run_context_tests(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
 
                 rows.append({
                     "symbol": symbol,
-                    "feature": FEATURE,
-                    "target": TARGET,
-                    "side": SIDE,
+                    "feature": feature,
+                    "target": target,
+                    "side": side,
                     "context_group": " + ".join(group_cols),
                     "context_label": label,
                     "cost_scenario": cost_name,
@@ -315,19 +333,27 @@ def score_results(results: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def run_context_conditioning(symbol: str = DEFAULT_SYMBOL) -> None:
+def run_context_conditioning(
+    symbol: str = DEFAULT_SYMBOL,
+    feature: str = DEFAULT_FEATURE,
+    target: str = DEFAULT_TARGET,
+    side: str = DEFAULT_SIDE,
+) -> None:
     symbol = symbol.upper().strip()
+    feature = feature.strip()
+    target = target.strip()
+    side = side.lower().strip()
 
     ledger_path = build_ledger_path(symbol)
-    output_root = build_output_root(symbol)
+    output_root = build_output_root(symbol, feature, target, side)
 
     print("=" * 90)
     print("BACQE DUKASCOPY 57 - CONTEXT CONDITIONING RESEARCH")
     print("=" * 90)
     print(f"Symbol:  {symbol}")
-    print(f"Feature: {FEATURE}")
-    print(f"Target:  {TARGET}")
-    print(f"Side:    {SIDE}")
+    print(f"Feature: {feature}")
+    print(f"Target:  {target}")
+    print(f"Side:    {side}")
     print(f"Ledger:  {ledger_path}")
     print(f"Output:  {output_root}")
     print("-" * 90)
@@ -341,14 +367,14 @@ def run_context_conditioning(symbol: str = DEFAULT_SYMBOL) -> None:
     ledger = pd.read_parquet(ledger_path)
     print(f"Loaded ledger rows: {len(ledger):,}")
 
-    candidate = prepare_candidate_ledger(ledger)
+    candidate = prepare_candidate_ledger(ledger, feature, target, side, )
     print(f"Candidate rows: {len(candidate):,}")
 
     if candidate.empty:
         print("[STOP] No matching candidate rows.")
         return
 
-    results = run_context_tests(candidate, symbol)
+    results = run_context_tests(candidate, symbol, feature, target, side, )
 
     if results.empty:
         print("[STOP] No context results generated.")
@@ -367,9 +393,9 @@ def run_context_conditioning(symbol: str = DEFAULT_SYMBOL) -> None:
         f.write("BACQE DUKASCOPY CONTEXT CONDITIONING RESEARCH REPORT\n")
         f.write("=" * 80 + "\n\n")
         f.write(f"Symbol: {symbol}\n")
-        f.write(f"Feature: {FEATURE}\n")
-        f.write(f"Target: {TARGET}\n")
-        f.write(f"Side: {SIDE}\n")
+        f.write(f"Feature: {feature}\n")
+        f.write(f"Target: {target}\n")
+        f.write(f"Side: {side}\n")
         f.write(f"Candidate rows: {len(candidate):,}\n")
         f.write(f"Result rows: {len(results):,}\n")
         f.write(f"Minimum trades per bucket: {MIN_TRADES:,}\n\n")
@@ -426,13 +452,24 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run Dukascopy context conditioning research."
     )
+
     parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    parser.add_argument("--feature", default=DEFAULT_FEATURE)
+    parser.add_argument("--target", default=DEFAULT_TARGET)
+    parser.add_argument("--side", default=DEFAULT_SIDE)
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    run_context_conditioning(symbol=args.symbol)
+
+    run_context_conditioning(
+        symbol=args.symbol,
+        feature=args.feature,
+        target=args.target,
+        side=args.side,
+    )
 
 
 if __name__ == "__main__":

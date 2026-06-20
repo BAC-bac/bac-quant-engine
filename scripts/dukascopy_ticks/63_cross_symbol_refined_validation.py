@@ -16,17 +16,54 @@ Validation:
 """
 
 from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
 
 
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
-SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY"]
+DEFAULT_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY"]
 
-FEATURE = "mid_return_1"
-TARGET = "future_return_1000"
-SIDE = "long"
+def discover_available_symbols() -> list[str]:
+    root = (
+        QUANT_LAB
+        / "data"
+        / "analysis"
+        / "dukascopy_context_conditioning_research"
+    )
+
+    if not root.exists():
+        return DEFAULT_SYMBOLS
+
+    symbols = []
+
+    for path in sorted(root.glob("symbol=*")):
+        if path.is_dir():
+            symbols.append(path.name.replace("symbol=", ""))
+
+    return symbols if symbols else DEFAULT_SYMBOLS
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run cross-symbol refined validation."
+    )
+
+    parser.add_argument(
+        "--symbols",
+        nargs="*",
+        default=None,
+        help="Optional list of symbols, e.g. --symbols EURUSD GBPUSD USDJPY EURJPY",
+    )
+
+    parser.add_argument(
+        "--auto-discover-symbols",
+        action="store_true",
+        help="Auto-discover symbols from context conditioning output folders.",
+    )
+
+    return parser.parse_args()
+
 
 TOP_N_PER_SYMBOL = 50
 MIN_TRADES_PER_YEAR = 5_000
@@ -48,16 +85,30 @@ def ensure_dirs() -> None:
         folder.mkdir(parents=True, exist_ok=True)
 
 
-def build_context_file(symbol: str) -> Path:
-    return (
+def discover_context_files(symbol: str) -> list[Path]:
+
+    symbol_root = (
         QUANT_LAB
         / "data"
         / "analysis"
         / "dukascopy_context_conditioning_research"
         / f"symbol={symbol}"
-        / "tables"
-        / "context_conditioning_ranked_latest.csv"
     )
+
+    if not symbol_root.exists():
+        return []
+
+    files = []
+
+    for path in sorted(symbol_root.glob("**/context_conditioning_ranked_latest.csv")):
+        relative_parts = path.relative_to(symbol_root).parts
+
+        if len(relative_parts) >= 2 and relative_parts[0] == "tables":
+            continue
+
+        files.append(path)
+
+    return files
 
 
 def build_ledger_file(symbol: str) -> Path:
@@ -196,13 +247,18 @@ def classify_result(row: pd.Series) -> str:
     return "cross_symbol_reject"
 
 
-def prepare_ledger(ledger: pd.DataFrame) -> pd.DataFrame:
+def prepare_ledger(
+    ledger: pd.DataFrame,
+    feature: str,
+    target: str,
+    side: str,
+) -> pd.DataFrame:
     ledger = ledger.copy()
 
     ledger = ledger[
-        (ledger["feature"].astype(str) == FEATURE)
-        & (ledger["target"].astype(str) == TARGET)
-        & (ledger["side"].astype(str) == SIDE)
+        (ledger["feature"].astype(str) == str(feature))
+        & (ledger["target"].astype(str) == str(target))
+        & (ledger["side"].astype(str) == str(side))
     ].copy()
 
     ledger["year"] = pd.to_numeric(ledger["year"], errors="coerce")
@@ -218,26 +274,63 @@ def prepare_ledger(ledger: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_candidate_contexts(symbol: str) -> pd.DataFrame:
-    path = build_context_file(symbol)
 
-    if not path.exists():
-        print(f"[MISSING CONTEXT FILE] {symbol}: {path}")
+    context_files = discover_context_files(symbol)
+
+    if not context_files:
+        print(f"[MISSING CONTEXT FILES] {symbol}")
         return pd.DataFrame()
 
-    df = pd.read_csv(path)
+    all_frames = []
+
+    for path in context_files:
+
+        try:
+
+            df = pd.read_csv(path)
+
+            df["source_file"] = str(path)
+
+            all_frames.append(df)
+
+        except Exception as exc:
+
+            print(
+                f"[LOAD FAILED] {path} | {exc}"
+            )
+
+    if not all_frames:
+        return pd.DataFrame()
+
+    df = pd.concat(
+        all_frames,
+        ignore_index=True,
+    )
 
     if "strong_survivor" in df.columns:
-        df = df[df["strong_survivor"] == True].copy()
+
+        df = df[
+            df["strong_survivor"] == True
+        ].copy()
+
     elif "survives_costs" in df.columns:
-        df = df[df["survives_costs"] == True].copy()
+
+        df = df[
+            df["survives_costs"] == True
+        ].copy()
 
     if df.empty:
         return df
 
     df = df.sort_values(
-        ["net_profit_factor", "net_total_return"],
+        [
+            "net_profit_factor",
+            "net_total_return",
+        ],
         ascending=[False, False],
-    ).head(TOP_N_PER_SYMBOL)
+    )
+
+    df = df.head(TOP_N_PER_SYMBOL)
 
     df["symbol"] = symbol
 
@@ -259,6 +352,10 @@ def validate_context(symbol: str, context_row: pd.Series, ledger: pd.DataFrame) 
         "cost_scenario": cost_scenario,
         "script57_net_pf": context_row.get("net_profit_factor", np.nan),
         "script57_trade_count": context_row.get("net_trade_count", np.nan),
+        "feature": context_row["feature"],
+        "target": context_row["target"],
+        "side": context_row["side"],
+        "source_file": context_row.get("source_file", ""),
     }
 
     profitable_years = 0
@@ -291,18 +388,20 @@ def validate_context(symbol: str, context_row: pd.Series, ledger: pd.DataFrame) 
 
 
 def main() -> None:
-    print("=" * 90)
-    print("BACQE DUKASCOPY 63 - CROSS SYMBOL REFINED VALIDATION")
-    print("=" * 90)
-    print(f"Symbols: {SYMBOLS}")
-    print(f"Output:  {OUTPUT_ROOT}")
-    print("-" * 90)
+    args = parse_args()
+
+    if args.auto_discover_symbols:
+        symbols = discover_available_symbols()
+    elif args.symbols:
+        symbols = [s.upper().strip() for s in args.symbols]
+    else:
+        symbols = DEFAULT_SYMBOLS
 
     ensure_dirs()
 
     all_results = []
 
-    for symbol in SYMBOLS:
+    for symbol in symbols:
         print(f"[SYMBOL] {symbol}")
 
         contexts = load_candidate_contexts(symbol)
@@ -317,15 +416,23 @@ def main() -> None:
             print(f"[MISSING LEDGER] {symbol}: {ledger_path}")
             continue
 
-        ledger = pd.read_parquet(ledger_path)
-        ledger = prepare_ledger(ledger)
-
-        print(f"Ledger rows after candidate filter: {len(ledger):,}")
+        raw_ledger = pd.read_parquet(ledger_path)
+        print(f"Raw ledger rows: {len(raw_ledger):,}")
+        ledger_cache = {}
 
         for idx, row in contexts.iterrows():
-            print(f"  [{idx + 1}/{len(contexts)}] {row['context_label']}")
+            feature = str(row["feature"])
+            target = str(row["target"])
+            side = str(row["side"])
 
-            result = validate_context(symbol, row, ledger)
+            cache_key = (feature, target, side)
+
+            if cache_key not in ledger_cache:
+                ledger_cache[cache_key] = prepare_ledger(raw_ledger, feature, target, side, )
+
+            candidate_ledger = ledger_cache[cache_key]
+
+            result = validate_context(symbol, row, candidate_ledger)
 
             if result is not None:
                 all_results.append(result)
@@ -380,6 +487,9 @@ def main() -> None:
                 [
                     "rank",
                     "symbol",
+                    "feature",
+                    "target",
+                    "side",
                     "context_group",
                     "context_label",
                     "cost_scenario",

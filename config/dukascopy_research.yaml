@@ -6,6 +6,7 @@ dukascopy_research:
     - EURUSD
     - GBPUSD
     - USDJPY
+    - EURJPY
 
   date_range:
     start: "2023-01-01"
