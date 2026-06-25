@@ -11,6 +11,7 @@ symbols:
   - EURGBP
   - GBPJPY
   - XAUUSD
+  - EURJPY
 
 paths:
   output_root: "E:/Quant_Lab/data/raw/ticks/mt5"
