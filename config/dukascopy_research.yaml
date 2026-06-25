@@ -7,9 +7,11 @@ dukascopy_research:
     - GBPUSD
     - USDJPY
     - EURJPY
+    - GBPJPY
+    - EURGBP
 
   date_range:
-    start: "2023-01-01"
+    start: "2017-01-01"
     end: "2025-12-31"
 
   paths:
@@ -38,8 +40,13 @@ dukascopy_research:
       - 250
       - 500
       - 1000
+      - 2500
+      - 5000
+      - 10000
+      - 20000
 
   research:
+    version: "2.0"
     target_feature: "mid_return_1"
     target_horizon: "future_return_1000"
-    min_trades: 5000
+    min_trades: 10000
