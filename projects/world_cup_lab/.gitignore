@@ -1,0 +1,13 @@
+# Environment variables / secrets
+.env
+.env.*
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Outputs / temporary files
+*.log
