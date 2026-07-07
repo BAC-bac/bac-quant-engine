@@ -1,3 +1,39 @@
+"""
+BACQE Sentinel Suite Cadence
+
+This script is intended to act as the hourly operational health check.
+
+It should remain lightweight enough to run frequently and should focus on:
+- Sentinel report generation
+- Market data health
+- Feature pipeline health
+- Regime classification health
+- Regime forecast health
+- Scheduler automation health
+- High-level freshness status
+
+The full recursive Data Lake freshness audit should not be run hourly once
+the Quant_Lab data lake becomes large. The full audit is better suited to a
+daily morning engineering check, currently scheduled separately at 07:30.
+
+Current monitoring model:
+
+1. Hourly Sentinel Suite
+   Purpose: operational heartbeat.
+   Frequency: hourly.
+   Script: scripts/sentinel/06_run_sentinel_suite.py.
+
+2. Daily Data Freshness Audit
+   Purpose: deeper recursive data lake freshness and storage review.
+   Frequency: daily at 07:30.
+   Script/output: E:/Quant_Lab/data/analysis/sentinel/sentinel_suite/data_lake_freshness_latest.csv.
+
+3. Weekly Data Registry / Integrity Review
+   Purpose: broad data lake inventory, quality review, and long-running maintenance.
+   Frequency: weekly.
+"""
+
+
 from pathlib import Path
 from datetime import datetime
 import subprocess
@@ -21,6 +57,11 @@ SENTINEL_SCRIPTS = [
     "scripts/sentinel/07_check_scheduler_automation_health.py",
 ]
 
+
+# NOTE:
+# This freshness section currently performs a recursive scan across important
+# monitored folders. As Quant_Lab grows, this should be refactored into a
+# faster hourly heartbeat check, while the full recursive audit remains daily.
 
 FRESHNESS_CHECKS = [
     ("mt5_ticks", QUANT_ROOT / "data/raw/ticks/mt5"),
