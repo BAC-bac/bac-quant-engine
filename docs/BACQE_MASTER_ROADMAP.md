@@ -459,3 +459,101 @@ Existing EURUSD candidate:
 - fails with realistic costs
 - shows contextual persistence
 - not currently tradable
+
+
+## Sentinel Monitoring Cadence Update
+
+### Status
+
+Completed / Active
+
+### Reason for Change
+
+The BACQE Data Lake has grown substantially and is now large enough that full recursive freshness audits should no longer run every hour. The audit remains valuable, but hourly recursive scanning creates unnecessary disk I/O, longer runtimes, and avoidable workload on the current storage infrastructure.
+
+The monitoring system has therefore been adjusted to separate fast operational monitoring from deeper data lake auditing.
+
+### Updated Monitoring Model
+
+#### Hourly Sentinel Suite
+
+Purpose:
+
+Provide an operational heartbeat for BACQE.
+
+Checks include:
+
+* Market data health
+* Feature pipeline health
+* Regime classification health
+* Regime forecast health
+* Scheduler automation health
+* High-level pipeline status
+
+Frequency:
+
+Hourly.
+
+Role:
+
+This remains the main short-cycle monitoring process and is designed to confirm that BACQE is alive, scheduled jobs are running, and key reports are updating.
+
+---
+
+#### Daily Data Freshness Audit
+
+Purpose:
+
+Perform a deeper freshness review of the Quant_Lab data lake.
+
+Checks include:
+
+* Latest MT5 tick data
+* Latest MT5 OHLCV data
+* Greyhound results freshness
+* RPG tips freshness
+* Processed data freshness
+* Analysis output freshness
+* Sentinel output freshness
+* Expected stale datasets
+* Legacy folders
+
+Frequency:
+
+Daily at 07:30.
+
+Role:
+
+This acts as the morning engineering report. It provides confidence that overnight and early-morning data processes have completed correctly without requiring a full recursive scan every hour.
+
+---
+
+#### Weekly Data Registry / Integrity Review
+
+Purpose:
+
+Perform broader data lake inventory, quality review, and long-running maintenance checks.
+
+Checks include:
+
+* Dataset inventory
+* Quality summaries
+* Missing or stale partitions
+* Storage growth
+* Long-running integrity checks
+
+Frequency:
+
+Weekly.
+
+Role:
+
+This remains the deeper maintenance layer and should be used for strategic review of BACQE’s expanding data lake.
+
+### Notes
+
+This monitoring cadence is intended to reduce unnecessary storage load while preserving operational confidence.
+
+Future improvement:
+
+Refactor the hourly Sentinel Suite so it performs only lightweight heartbeat checks, while the full recursive freshness audit remains a daily or weekly process depending on storage growth and infrastructure capacity.
