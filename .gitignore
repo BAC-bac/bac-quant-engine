@@ -9,8 +9,6 @@ __pycache__/
 .idea/
 .vscode/
 
-*.csv
-*.parquet
 *.db
 *.sqlite
 
@@ -18,6 +16,7 @@ logs/
 outputs/
 market_data/
 reports/
+macro_data/processed/
 
 # Project inventories
 bacqe_script_inventory.txt

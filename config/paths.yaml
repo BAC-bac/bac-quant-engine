@@ -1,4 +1,5 @@
 data_lake_root:
+  windows_network: "Q:/"
   windows: "E:/Quant_Lab"
   linux: "/mnt/quant_lab"
 
