@@ -1,0 +1,50 @@
+dukascopy_pipeline:
+  enabled: true
+  state_registry_path: "E:/Quant_Lab/data/analysis/dukascopy_pipeline_state_registry/dukascopy_pipeline_state_registry_latest.csv"
+  output_root: "E:/Quant_Lab/data/analysis/dukascopy_pipeline_decision_engine"
+
+  stages:
+    - stage_key: raw_ticks
+      status_column: raw_status
+      complete_values:
+        - complete_or_near_complete
+      next_script_stage: "07"
+      priority: critical
+
+    - stage_key: processed_ticks
+      status_column: processed_tick_status
+      complete_values:
+        - complete_or_near_complete
+        - partial
+      next_script_stage: "08"
+      priority: critical
+
+    - stage_key: tick_bars
+      status_column: tick_bar_status
+      complete_values:
+        - present
+      next_script_stage: "09"
+      priority: high
+
+    - stage_key: tick_imbalance_bars
+      status_column: tib_status
+      complete_values:
+        - present
+      next_script_stage: "10"
+      priority: high
+
+    - stage_key: engineered_features
+      status_column: engineered_feature_status
+      complete_values:
+        - complete_or_near_complete
+        - partial
+      next_script_stage: "23"
+      priority: high
+
+    - stage_key: horizon_features
+      status_column: horizon_feature_status
+      complete_values:
+        - complete_or_near_complete
+        - partial
+      next_script_stage: "30"
+      priority: medium

@@ -37,6 +37,17 @@ STAGE_SCRIPTS = {
     "09": Path("scripts/dukascopy_ticks/09_build_dukascopy_tick_bars_date_range.py"),
     "10": Path("scripts/dukascopy_ticks/10_build_dukascopy_tibs_date_range.py"),
     "11": Path("scripts/dukascopy_ticks/11_audit_dukascopy_range_outputs.py"),
+    "23": Path("scripts/dukascopy_ticks/23_build_engineered_tick_features.py"),
+    "30": Path("scripts/dukascopy_ticks/30_horizon_expansion_engine.py"),
+}
+
+STAGE_ARG_MODES = {
+    "08": "symbol_dates",
+    "09": "symbol_dates",
+    "10": "symbol_dates",
+    "11": "symbol_dates",
+    "23": "symbol_only",
+    "30": "symbol_only",
 }
 
 
@@ -103,21 +114,32 @@ def run_command(command: list[str], log_path: Path) -> int:
 
 
 def build_command(
+    stage: str,
     script_path: Path,
     symbol: str,
     start_date: str,
     end_date: str,
 ) -> list[str]:
-    return [
+    mode = STAGE_ARG_MODES.get(stage, "symbol_dates")
+
+    command = [
         sys.executable,
         str(script_path),
         "--symbol",
         symbol,
-        "--start-date",
-        start_date,
-        "--end-date",
-        end_date,
     ]
+
+    if mode == "symbol_dates":
+        command.extend(
+            [
+                "--start-date",
+                start_date,
+                "--end-date",
+                end_date,
+            ]
+        )
+
+    return command
 
 
 def print_header(
@@ -182,12 +204,8 @@ def main(
         print("-" * 90)
 
         for symbol in selected_symbols:
-            command = build_command(
-                script_path=script_path,
-                symbol=symbol,
-                start_date=start_date,
-                end_date=end_date,
-            )
+            command = build_command(stage=stage, script_path=script_path, symbol=symbol, start_date=start_date,
+                end_date=end_date, )
 
             print(f"\n[RUN] Stage {stage} | Symbol {symbol}")
             print(" ".join(command))
