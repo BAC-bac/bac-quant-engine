@@ -3,6 +3,13 @@ data_lake_root:
   windows: "E:/Quant_Lab"
   linux: "/mnt/quant_lab"
 
+market_data:
+  mt5_ohlcv:
+    ftmo_d1:
+      windows_network: "Q:/data/raw/fx/mt5_ohlcv/FTMO/D1"
+      windows_local: "E:/Quant_Lab/data/raw/fx/mt5_ohlcv/FTMO/D1"
+      linux: "/mnt/quant_lab/data/raw/fx/mt5_ohlcv/FTMO/D1"
+
 greyhounds:
   raw_results: "greyhounds/raw/results"
   raw_tips: "greyhounds/raw/tips"

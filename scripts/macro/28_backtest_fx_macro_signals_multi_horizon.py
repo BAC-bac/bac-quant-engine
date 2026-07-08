@@ -1,13 +1,43 @@
 from pathlib import Path
-
+import platform
 import pandas as pd
+import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-SIGNALS_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_signals_v4.csv"
-PRICE_DIR = Path(r"E:\BAC_Quant_Universe\data\mt5_ohlcv\FTMO\D1")
+def select_existing_path(candidates: list[str]) -> Path:
+    for candidate in candidates:
+        if candidate is None:
+            continue
 
+        path = Path(candidate)
+        if path.exists():
+            return path
+
+    return Path(next(candidate for candidate in candidates if candidate is not None))
+
+
+def load_ftmo_d1_price_dir() -> Path:
+    config_file = PROJECT_ROOT / "config" / "paths.yaml"
+
+    with config_file.open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    paths = config["market_data"]["mt5_ohlcv"]["ftmo_d1"]
+
+    if platform.system().lower() == "windows":
+        return select_existing_path(
+            [
+                paths.get("windows_network"),
+                paths.get("windows_local"),
+            ]
+        )
+
+    return Path(paths["linux"])
+
+SIGNALS_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_signals_v4.csv"
+PRICE_DIR = load_ftmo_d1_price_dir()
 OUTPUT_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v4_multi_horizon_d1.csv"
 SUMMARY_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v4_multi_horizon_d1_summary.csv"
 

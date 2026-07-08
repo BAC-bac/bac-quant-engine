@@ -1,13 +1,25 @@
 from pathlib import Path
-
+import platform
 import pandas as pd
+import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-SIGNALS_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_signals_v5.csv"
-PRICE_DIR = Path(r"E:\BAC_Quant_Universe\data\mt5_ohlcv\FTMO\D1")
 
+def load_ftmo_d1_price_dir() -> Path:
+    config_file = PROJECT_ROOT / "config" / "paths.yaml"
+
+    with config_file.open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    os_key = "windows" if platform.system().lower() == "windows" else "linux"
+
+    return Path(config["market_data"]["mt5_ohlcv"]["ftmo_d1"][os_key])
+
+
+SIGNALS_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_signals_v5.csv"
+PRICE_DIR = load_ftmo_d1_price_dir()
 OUTPUT_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v5_multi_horizon_d1.csv"
 SUMMARY_FILE = PROJECT_ROOT / "macro_data" / "processed" / "fx_backtest_v5_multi_horizon_d1_summary.csv"
 
