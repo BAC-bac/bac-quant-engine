@@ -1,31 +1,61 @@
 from __future__ import annotations
 
 import os
+import platform
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 import pandas as pd
 import requests
-
+import yaml
 from dotenv import load_dotenv
 
+
 load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CONFIG_FILE = PROJECT_ROOT / "config" / "paths.yaml"
 
 SOURCE = "financialmodelingprep"
 DATASET = "economic_calendar_snapshots"
 BASE_URL = "https://financialmodelingprep.com/stable/economic-calendar"
 
 
+def load_config() -> dict:
+    with CONFIG_FILE.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def select_existing_path(candidates: list[str]) -> Path:
+    for candidate in candidates:
+        if candidate is None:
+            continue
+
+        path = Path(candidate)
+        if path.exists():
+            return path
+
+    return Path(next(candidate for candidate in candidates if candidate is not None))
+
+
 def get_data_lake_root() -> Path:
     env_path = os.getenv("DATA_LAKE_ROOT")
-    if env_path:
+    if env_path and Path(env_path).exists():
         return Path(env_path)
 
-    linux_path = Path("/mnt/quant_lab")
-    if linux_path.exists():
-        return linux_path
+    config = load_config()
+    paths = config["data_lake_root"]
 
-    raise FileNotFoundError("Could not find /mnt/quant_lab and DATA_LAKE_ROOT is not set.")
+    if platform.system().lower() == "windows":
+        return select_existing_path(
+            [
+                paths.get("windows_network"),
+                paths.get("windows_local"),
+                paths.get("windows"),
+            ]
+        )
+
+    return Path(paths["linux"])
 
 
 def build_output_dir(data_lake_root: Path, run_time_utc: datetime) -> Path:
@@ -49,6 +79,7 @@ def fetch_economic_calendar(api_key: str, start_date: str, end_date: str) -> lis
     }
 
     response = requests.get(BASE_URL, params=params, timeout=30)
+
     if response.status_code == 402:
         print(
             "[WARN] FMP returned 402 Payment Required. "
@@ -57,7 +88,6 @@ def fetch_economic_calendar(api_key: str, start_date: str, end_date: str) -> lis
         return []
 
     response.raise_for_status()
-
     payload = response.json()
 
     if isinstance(payload, dict):
@@ -127,14 +157,22 @@ def save_outputs(df: pd.DataFrame, output_dir: Path, run_time_utc: datetime) -> 
     parquet_path = output_dir / f"{DATASET}_{date_str}.parquet"
     csv_path = output_dir / f"{DATASET}_{date_str}.csv"
 
+    latest_parquet = output_dir / f"{DATASET}_latest.parquet"
+    latest_csv = output_dir / f"{DATASET}_latest.csv"
+
     df.to_parquet(parquet_path, index=False)
     df.to_csv(csv_path, index=False)
 
+    df.to_parquet(latest_parquet, index=False)
+    df.to_csv(latest_csv, index=False)
+
     print()
     print("[DONE] Economic calendar snapshot saved.")
-    print(f"Rows:    {len(df):,}")
-    print(f"Parquet: {parquet_path}")
-    print(f"CSV:     {csv_path}")
+    print(f"Rows:           {len(df):,}")
+    print(f"Parquet:        {parquet_path}")
+    print(f"CSV:            {csv_path}")
+    print(f"Latest parquet: {latest_parquet}")
+    print(f"Latest CSV:     {latest_csv}")
 
 
 def main() -> None:
@@ -146,12 +184,20 @@ def main() -> None:
 
     api_key = os.getenv("FMP_API_KEY")
     if not api_key:
+        data_lake_root = get_data_lake_root()
+        output_dir = build_output_dir(data_lake_root, run_time_utc)
+
+        print(f"Data lake:  {data_lake_root}")
+        print(f"Output dir: {output_dir}")
+        print("-" * 90)
         print("[WARN] FMP_API_KEY is not set.")
         print()
-        print("To use this collector, add your API key temporarily with:")
-        print("export FMP_API_KEY='your_api_key_here'")
+        print("PowerShell temporary setup:")
+        print('$env:FMP_API_KEY="your_api_key_here"')
         print()
-        print("Or permanently add it to ~/.bashrc later.")
+        print("Permanent project setup:")
+        print("Add this line to .env:")
+        print("FMP_API_KEY=your_api_key_here")
         return
 
     start_date = (run_time_utc.date() - timedelta(days=2)).isoformat()
