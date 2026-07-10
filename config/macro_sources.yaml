@@ -1,0 +1,25 @@
+sources:
+  fred:
+    name: "Federal Reserve Economic Data"
+    role: "US macro, rates, inflation, labour, credit"
+    collector_script: "scripts/information_data/04_collect_fred_macro_series.py"
+    output_root: "data/raw/information_data/fred_macro_series"
+    credentials_required: true
+    credential_env_var: "FRED_API_KEY"
+    priority: 1
+
+  boe:
+    name: "Bank of England"
+    role: "UK policy rate"
+    collector_script: "scripts/information_data/05_collect_boe_bank_rate.py"
+    output_root: "data/raw/information_data/boe_bank_rate"
+    credentials_required: false
+    priority: 1
+
+  us_treasury:
+    name: "US Treasury FiscalData"
+    role: "US yield curve"
+    collector_script: "scripts/information_data/06_collect_us_treasury_yield_curve.py"
+    output_root: "data/raw/information_data/us_treasury_yield_curve"
+    credentials_required: false
+    priority: 1

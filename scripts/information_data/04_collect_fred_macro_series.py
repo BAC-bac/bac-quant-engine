@@ -3,13 +3,17 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from datetime import datetime, timezone
-
+import platform
+import yaml
 import pandas as pd
 import requests
 from dotenv import load_dotenv
 
 
 load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CONFIG_FILE = PROJECT_ROOT / "config" / "paths.yaml"
 
 SOURCE = "fred"
 DATASET = "fred_macro_series"
@@ -54,17 +58,41 @@ FRED_SERIES = {
 }
 
 
+def load_config() -> dict:
+    with CONFIG_FILE.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def select_existing_path(candidates: list[str]) -> Path:
+    for candidate in candidates:
+        if candidate is None:
+            continue
+
+        path = Path(candidate)
+        if path.exists():
+            return path
+
+    return Path(next(candidate for candidate in candidates if candidate is not None))
+
+
 def get_data_lake_root() -> Path:
     env_path = os.getenv("DATA_LAKE_ROOT")
-    if env_path:
+    if env_path and Path(env_path).exists():
         return Path(env_path)
 
-    linux_path = Path("/mnt/quant_lab")
-    if linux_path.exists():
-        return linux_path
+    config = load_config()
+    paths = config["data_lake_root"]
 
-    raise FileNotFoundError("Could not find /mnt/quant_lab and DATA_LAKE_ROOT is not set.")
+    if platform.system().lower() == "windows":
+        return select_existing_path(
+            [
+                paths.get("windows_network"),
+                paths.get("windows_local"),
+                paths.get("windows"),
+            ]
+        )
 
+    return Path(paths["linux"])
 
 def build_output_dir(data_lake_root: Path, run_time_utc: datetime) -> Path:
     return (
