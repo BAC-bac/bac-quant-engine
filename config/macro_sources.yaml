@@ -18,7 +18,7 @@ sources:
 
   us_treasury:
     name: "US Treasury FiscalData"
-    role: "US yield curve"
+    role: "us_treasury_average_interest_rates"
     collector_script: "scripts/information_data/06_collect_us_treasury_yield_curve.py"
     output_root: "data/raw/information_data/us_treasury_yield_curve"
     credentials_required: false

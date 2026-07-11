@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import os
+import platform
 from pathlib import Path
+
+import yaml
 from datetime import datetime, timezone
 
 import pandas as pd
 import requests
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CONFIG_FILE = PROJECT_ROOT / "config" / "paths.yaml"
+
 SOURCE = "us_treasury_fiscaldata"
-DATASET = "us_treasury_yield_curve"
+DATASET = "us_treasury_average_interest_rates"
 
 BASE_URL = (
     "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
@@ -17,16 +23,76 @@ BASE_URL = (
 )
 
 
+def load_config() -> dict:
+    if not CONFIG_FILE.exists():
+        raise FileNotFoundError(f"Could not find configuration file: {CONFIG_FILE}")
+
+    with CONFIG_FILE.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if not isinstance(config, dict):
+        raise ValueError(f"Invalid YAML configuration: {CONFIG_FILE}")
+
+    return config
+
+
+def select_existing_path(candidates: list[str | None]) -> Path:
+    valid_candidates = [candidate for candidate in candidates if candidate]
+
+    if not valid_candidates:
+        raise ValueError("No Data Lake path candidates were configured.")
+
+    for candidate in valid_candidates:
+        path = Path(candidate)
+
+        if path.exists():
+            return path
+
+    raise FileNotFoundError(
+        "None of the configured Data Lake paths exists: "
+        + ", ".join(valid_candidates)
+    )
+
+
 def get_data_lake_root() -> Path:
     env_path = os.getenv("DATA_LAKE_ROOT")
+
     if env_path:
-        return Path(env_path)
+        environment_root = Path(env_path)
 
-    linux_path = Path("/mnt/quant_lab")
-    if linux_path.exists():
-        return linux_path
+        if environment_root.exists():
+            return environment_root
 
-    raise FileNotFoundError("Could not find /mnt/quant_lab and DATA_LAKE_ROOT is not set.")
+        print(
+            f"[WARN] DATA_LAKE_ROOT is set but does not exist: "
+            f"{environment_root}"
+        )
+
+    config = load_config()
+    paths = config["data_lake_root"]
+
+    if platform.system().lower() == "windows":
+        return select_existing_path(
+            [
+                paths.get("windows_network"),
+                paths.get("windows_local"),
+                paths.get("windows"),
+            ]
+        )
+
+    linux_path = paths.get("linux")
+
+    if not linux_path:
+        raise KeyError("'data_lake_root.linux' is missing from config/paths.yaml")
+
+    resolved_path = Path(linux_path)
+
+    if not resolved_path.exists():
+        raise FileNotFoundError(
+            f"Configured Linux Data Lake does not exist: {resolved_path}"
+        )
+
+    return resolved_path
 
 
 def build_output_dir(data_lake_root: Path, run_time_utc: datetime) -> Path:
@@ -128,6 +194,48 @@ def collect_yield_curve() -> pd.DataFrame:
     return df
 
 
+def validate_treasury_data(df: pd.DataFrame) -> None:
+    required_columns = {
+        "record_date",
+        "security_type_desc",
+        "security_desc",
+        "avg_interest_rate_amt",
+    }
+
+    missing_columns = required_columns.difference(df.columns)
+
+    if missing_columns:
+        raise ValueError(
+            "Treasury output is missing required columns: "
+            f"{sorted(missing_columns)}"
+        )
+
+    if df.empty:
+        raise ValueError("Treasury output contains no rows.")
+
+    if df["record_date"].isna().all():
+        raise ValueError("Treasury output contains no valid record dates.")
+
+    current_date = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    future_rows = df[df["record_date"] > current_date]
+
+    if not future_rows.empty:
+        raise ValueError(
+            "Treasury output contains future record dates: "
+            f"{future_rows['record_date'].dt.strftime('%Y-%m-%d').tolist()[:10]}"
+        )
+
+    invalid_rates = df[
+        (df["avg_interest_rate_amt"] < 0)
+        | (df["avg_interest_rate_amt"] > 30)
+    ]
+
+    if not invalid_rates.empty:
+        raise ValueError(
+            "Treasury output contains implausible average interest rates."
+        )
+
+
 def save_outputs(df: pd.DataFrame, output_dir: Path, run_time_utc: datetime) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -160,7 +268,7 @@ def save_outputs(df: pd.DataFrame, output_dir: Path, run_time_utc: datetime) -> 
 
 def main() -> None:
     print("=" * 90)
-    print("BACQE INFORMATION DATA - US TREASURY INTEREST RATE DATA")
+    print("BACQE INFORMATION DATA - US TREASURY AVERAGE INTEREST RATES")
     print("=" * 90)
 
     run_time_utc = datetime.now(timezone.utc)
@@ -177,6 +285,8 @@ def main() -> None:
     if df.empty:
         print("[WARN] No Treasury data collected.")
         return
+
+    validate_treasury_data(df)
 
     save_outputs(df, output_dir, run_time_utc)
     print("=" * 90)

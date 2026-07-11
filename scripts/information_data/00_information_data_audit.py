@@ -54,7 +54,7 @@ EXPECTED_DATASETS = [
         "priority": 1,
     },
     {
-        "dataset": "us_treasury_yield_curve",
+        "dataset": "us_treasury_average_interest_rates",
         "source": "us_treasury_fiscaldata",
         "collector_script": "06_collect_us_treasury_yield_curve.py",
         "credentials_required": False,
