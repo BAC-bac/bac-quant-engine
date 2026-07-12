@@ -57,7 +57,7 @@ STAGES = [
     {
         "stage_key": "EH03",
         "stage_name": "stability_engine",
-        "path": BASE_DIR / "data" / "analysis" / "dukascopy_extended_horizons" / "stability_engine",
+        "path": BASE_DIR / "data" / "analysis" / "dukascopy_extended_horizons" / "feature_stability",
         "pattern": "{symbol_lower}_extended_horizon_stability_latest.csv",
         "completion_type": "rows_positive",
     },
