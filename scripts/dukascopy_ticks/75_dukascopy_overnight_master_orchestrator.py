@@ -77,6 +77,8 @@ CONTROL_SCRIPTS = [
     Path("scripts/dukascopy_ticks/72_extended_horizon_global_cohort_registry.py"),
     Path("scripts/dukascopy_ticks/73_extended_horizon_global_cohort_decision_engine.py"),
     Path("scripts/dukascopy_ticks/74_dukascopy_new_symbol_onboarding_engine.py"),
+    Path("scripts/dukascopy_ticks/76_dukascopy_durable_resume_ledger.py"),
+    Path("scripts/dukascopy_ticks/77_dukascopy_morning_intelligence_report.py"),
 ]
 
 
@@ -103,6 +105,12 @@ PIPELINE_FAILURES_PATH = (
     ANALYSIS_ROOT
     / "dukascopy_pipeline_verification_engine"
     / "dukascopy_pipeline_verification_failures_latest.csv"
+)
+
+RESUME_PLAN_PATH = (
+    ANALYSIS_ROOT
+    / "dukascopy_durable_resume_ledger"
+    / "dukascopy_resume_plan_latest.csv"
 )
 
 
@@ -391,6 +399,43 @@ def refresh_control_state(
     )
 
 
+def durable_resume_action() -> dict | None:
+    resume_plan = safe_read_csv(RESUME_PLAN_PATH)
+
+    if resume_plan.empty:
+        return None
+
+    if "resume_eligible" in resume_plan.columns:
+        resume_plan = resume_plan[
+            resume_plan["resume_eligible"].astype(str).str.lower()
+            .isin(["true", "1", "yes"])
+        ]
+
+    if resume_plan.empty:
+        return None
+
+    if "priority_rank" in resume_plan.columns:
+        resume_plan = resume_plan.sort_values(
+            ["priority_rank", "attempt_count", "symbol"],
+            ascending=[True, True, True],
+        )
+
+    row = resume_plan.iloc[0]
+
+    command = str(row.get("command", "")).strip()
+
+    if not command:
+        return None
+
+    return {
+        "source": "durable_resume_ledger",
+        "symbol": str(row.get("symbol", "UNKNOWN")),
+        "stage": str(row.get("stage", "UNKNOWN")),
+        "priority": str(row.get("priority", "medium")),
+        "command": command,
+    }
+
+
 def recovery_action() -> dict | None:
     recovery = safe_read_csv(RECOVERY_PLAN_PATH)
 
@@ -502,10 +547,16 @@ def global_cohort_action() -> dict | None:
 def select_next_action() -> dict | None:
     """
     Action precedence:
-        1. Recovery
-        2. Symbol onboarding / ingestion / EH01-EH10
-        3. Global cohort EH11-EH13
+        1. Durable resume plan
+        2. Recovery
+        3. Symbol onboarding / ingestion / EH01-EH10
+        4. Global cohort EH11-EH13
     """
+
+    resume = durable_resume_action()
+
+    if resume is not None:
+        return resume
 
     recovery = recovery_action()
 
@@ -515,9 +566,6 @@ def select_next_action() -> dict | None:
     onboarding = onboarding_action()
 
     if onboarding is not None:
-        # Script 74 sometimes queues a governance refresh command rather
-        # than a heavy symbol command. Prefer the concrete EH11-EH13 action
-        # from Script 73 when it is available.
         if onboarding["symbol"] == "GLOBAL":
             global_action = global_cohort_action()
 
