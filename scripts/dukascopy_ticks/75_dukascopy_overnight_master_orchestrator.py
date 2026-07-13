@@ -78,9 +78,11 @@ CONTROL_SCRIPTS = [
     Path("scripts/dukascopy_ticks/73_extended_horizon_global_cohort_decision_engine.py"),
     Path("scripts/dukascopy_ticks/74_dukascopy_new_symbol_onboarding_engine.py"),
     Path("scripts/dukascopy_ticks/76_dukascopy_durable_resume_ledger.py"),
-    Path("scripts/dukascopy_ticks/77_dukascopy_morning_intelligence_report.py"),
 ]
 
+MORNING_REPORT_SCRIPT = Path(
+    "scripts/dukascopy_ticks/77_dukascopy_morning_intelligence_report.py"
+)
 
 RECOVERY_PLAN_PATH = (
     ANALYSIS_ROOT
@@ -397,6 +399,47 @@ def refresh_control_state(
         master_log_path,
         f"CONTROL REFRESH {refresh_number} COMPLETE",
     )
+
+
+def generate_morning_report(
+    run_id: str,
+    master_log_path: Path,
+    dry_run: bool,
+) -> None:
+    """
+    Generate the morning intelligence report after Script 75 has written
+    its final run state.
+
+    Script 77 must not run inside the normal control refresh because the
+    overnight orchestrator is still legitimately marked as running then.
+    """
+
+    script_path = PROJECT_ROOT / MORNING_REPORT_SCRIPT
+
+    if not script_path.exists():
+        raise FileNotFoundError(
+            f"Missing morning intelligence script: {script_path}"
+        )
+
+    command = f"python {MORNING_REPORT_SCRIPT}"
+
+    log_path = (
+        LOG_ROOT
+        / f"{run_id}_final_morning_intelligence_report.log"
+    )
+
+    return_code, _ = run_streaming_command(
+        command=command,
+        log_path=log_path,
+        master_log_path=master_log_path,
+        dry_run=dry_run,
+    )
+
+    if return_code != 0:
+        raise RuntimeError(
+            "Morning intelligence report failed with "
+            f"return code {return_code}."
+        )
 
 
 def durable_resume_action() -> dict | None:
@@ -884,6 +927,8 @@ def main(
         write_state(state)
         save_ledger(records)
         write_report(state, records)
+
+        generate_morning_report(run_id=run_id, master_log_path=master_log_path, dry_run=dry_run, )
 
         append_master_log(
             master_log_path,
