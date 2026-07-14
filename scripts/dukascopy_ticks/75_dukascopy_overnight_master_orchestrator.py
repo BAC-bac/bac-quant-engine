@@ -78,10 +78,17 @@ CONTROL_SCRIPTS = [
     Path("scripts/dukascopy_ticks/73_extended_horizon_global_cohort_decision_engine.py"),
     Path("scripts/dukascopy_ticks/74_dukascopy_new_symbol_onboarding_engine.py"),
     Path("scripts/dukascopy_ticks/76_dukascopy_durable_resume_ledger.py"),
+    Path("scripts/dukascopy_ticks/78_dukascopy_resource_aware_research_scheduler.py"),
+    Path("scripts/dukascopy_ticks/79_dukascopy_workload_execution_planner.py"),
 ]
 
 MORNING_REPORT_SCRIPT = Path(
     "scripts/dukascopy_ticks/77_dukascopy_morning_intelligence_report.py"
+)
+
+EXECUTION_CONTROLLER_SCRIPT = Path(
+    "scripts/dukascopy_ticks/"
+    "80_dukascopy_autonomous_execution_controller.py"
 )
 
 RECOVERY_PLAN_PATH = (
@@ -115,6 +122,17 @@ RESUME_PLAN_PATH = (
     / "dukascopy_resume_plan_latest.csv"
 )
 
+WORKLOAD_EXECUTION_PLAN_PATH = (
+    ANALYSIS_ROOT
+    / "dukascopy_workload_execution_planner"
+    / "dukascopy_workload_execution_plan_latest.csv"
+)
+
+EXECUTION_DIRECTIVE_PATH = (
+    ANALYSIS_ROOT
+    / "dukascopy_autonomous_execution_controller"
+    / "dukascopy_execution_directive_latest.json"
+)
 
 @dataclass
 class RunState:
@@ -248,6 +266,23 @@ def safe_read_csv(path: Path) -> pd.DataFrame:
     except Exception as exc:
         raise RuntimeError(
             f"Failed reading control CSV {path}: {exc}"
+        ) from exc
+
+
+def safe_read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+
+    try:
+        return json.loads(
+            path.read_text(
+                encoding="utf-8"
+            )
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed reading JSON {path}: "
+            f"{type(exc).__name__}: {exc}"
         ) from exc
 
 
@@ -401,6 +436,49 @@ def refresh_control_state(
     )
 
 
+def refresh_execution_controller(
+    run_id: str,
+    master_log_path: Path,
+    dry_run: bool,
+) -> None:
+    """
+    Run Script 80 after Scripts 65-79 have refreshed.
+
+    Script 75 is legitimately marked as running at this point, so
+    Script 80 must be called with --allow-active-orchestrator.
+    """
+
+    script_path = PROJECT_ROOT / EXECUTION_CONTROLLER_SCRIPT
+
+    if not script_path.exists():
+        raise FileNotFoundError(
+            f"Missing execution controller script: {script_path}"
+        )
+
+    command = (
+        f"python {EXECUTION_CONTROLLER_SCRIPT} "
+        "--allow-active-orchestrator"
+    )
+
+    log_path = (
+        LOG_ROOT
+        / f"{run_id}_execution_controller.log"
+    )
+
+    return_code, _ = run_streaming_command(
+        command=command,
+        log_path=log_path,
+        master_log_path=master_log_path,
+        dry_run=dry_run,
+    )
+
+    if return_code != 0:
+        raise RuntimeError(
+            "Autonomous execution controller failed with "
+            f"return code {return_code}."
+        )
+
+
 def generate_morning_report(
     run_id: str,
     master_log_path: Path,
@@ -441,6 +519,127 @@ def generate_morning_report(
             f"return code {return_code}."
         )
 
+
+def controller_authorised_action() -> dict | None:
+    """
+    Read Script 80's latest directive.
+
+    Only an explicit 'execute' directive is converted into a job.
+    All other directive types return no action and are handled separately.
+    """
+
+    directive = safe_read_json(
+        EXECUTION_DIRECTIVE_PATH
+    )
+
+    if not directive:
+        return None
+
+    if str(
+        directive.get("directive", "")
+    ).strip() != "execute":
+        return None
+
+    command = str(
+        directive.get("command", "")
+    ).strip()
+
+    if not command:
+        raise RuntimeError(
+            "Script 80 issued an execute directive "
+            "without a command."
+        )
+
+    return {
+        "source": str(
+            directive.get(
+                "source",
+                "autonomous_execution_controller",
+            )
+        ),
+        "symbol": str(
+            directive.get("symbol", "UNKNOWN")
+        ),
+        "stage": str(
+            directive.get("stage", "UNKNOWN")
+        ),
+        "priority": str(
+            directive.get("priority", "medium")
+        ),
+        "command": command,
+    }
+
+
+def controller_directive() -> dict:
+    """
+    Return Script 80's latest directive.
+
+    An empty dictionary means no valid directive file is available.
+    """
+
+    return safe_read_json(
+        EXECUTION_DIRECTIVE_PATH
+    )
+
+
+def planned_workload_action() -> dict | None:
+    """
+    Return the first executable job from Script 79's workload plan.
+
+    Script 79 has already:
+        - received resource-approved work from Script 78;
+        - validated dependencies;
+        - placed jobs in a safe execution order.
+
+    Script 75 should therefore prefer this plan over the raw action files.
+    """
+
+    plan = safe_read_csv(WORKLOAD_EXECUTION_PLAN_PATH)
+
+    if plan.empty:
+        return None
+
+    if "planner_status" in plan.columns:
+        plan = plan[
+            plan["planner_status"].astype(str) == "planned"
+        ]
+
+    if plan.empty:
+        return None
+
+    if "execution_position" in plan.columns:
+        plan = plan.sort_values(
+            "execution_position",
+            ascending=True,
+        )
+
+    row = plan.iloc[0]
+
+    command = str(
+        row.get("command", "")
+    ).strip()
+
+    if not command:
+        return None
+
+    return {
+        "source": str(
+            row.get(
+                "source",
+                "workload_execution_planner",
+            )
+        ),
+        "symbol": str(
+            row.get("symbol", "UNKNOWN")
+        ),
+        "stage": str(
+            row.get("stage", "UNKNOWN")
+        ),
+        "priority": str(
+            row.get("priority", "medium")
+        ),
+        "command": command,
+    }
 
 def durable_resume_action() -> dict | None:
     resume_plan = safe_read_csv(RESUME_PLAN_PATH)
@@ -589,12 +788,23 @@ def global_cohort_action() -> dict | None:
 
 def select_next_action() -> dict | None:
     """
-    Action precedence:
-        1. Durable resume plan
-        2. Recovery
-        3. Symbol onboarding / ingestion / EH01-EH10
-        4. Global cohort EH11-EH13
+    Select the next executable overnight action.
+
+    Temporary precedence during Script 78/79 integration:
+        1. Script 79 workload execution plan
+        2. Script 76 durable resume plan
+        3. Script 68 recovery action
+        4. Script 74 onboarding action
+        5. Script 73 global cohort action
+
+    The lower-level selectors remain temporarily as a fallback while
+    the resource scheduler and workload planner are being integrated.
     """
+
+    planned = planned_workload_action()
+
+    if planned is not None:
+        return planned
 
     resume = durable_resume_action()
 
@@ -609,6 +819,9 @@ def select_next_action() -> dict | None:
     onboarding = onboarding_action()
 
     if onboarding is not None:
+        # Script 74 can sometimes point to a governance refresh rather
+        # than the concrete EH11-EH13 command. Prefer Script 73's global
+        # action when one is available.
         if onboarding["symbol"] == "GLOBAL":
             global_action = global_cohort_action()
 
@@ -777,6 +990,8 @@ def main(
                 dry_run=dry_run,
             )
 
+            refresh_execution_controller(run_id=run_id, master_log_path=master_log_path, dry_run=dry_run, )
+
             verification_failures = (
                 unresolved_verification_failures()
             )
@@ -789,14 +1004,63 @@ def main(
                 ),
             )
 
-            action = select_next_action()
+            directive = controller_directive()
 
-            if action is None:
+            directive_type = str(directive.get("directive", "")).strip()
+
+            controller_status = str(directive.get("controller_status", "")).strip()
+
+            append_master_log(master_log_path, ("CONTROLLER | "
+                                                f"directive={directive_type or 'missing'} "
+                                                f"status={controller_status or 'unknown'}"), )
+
+            if directive_type == "execute":
+                action = controller_authorised_action()
+
+                if action is None:
+                    state.status = "failed"
+                    state.stop_reason = ("Script 80 issued an execute directive, but no valid "
+                                         "authorised action could be read.")
+                    break
+
+            elif directive_type == "no_work":
+                action = None
                 state.status = "complete"
-                state.stop_reason = (
-                    "No recovery, onboarding, or global cohort actions remain."
-                )
+                state.stop_reason = ("Script 80 confirmed that no executable workload remains.")
                 break
+
+            elif directive_type == "wait":
+                action = None
+                state.status = "stopped_by_controller"
+                state.stop_reason = ("Script 80 instructed the orchestrator to wait: "
+                                     f"{directive.get('decision_reason', '')}")
+                break
+
+            elif directive_type == "blocked":
+                action = None
+                state.status = "blocked_by_controller"
+                state.stop_reason = ("Script 80 blocked automated execution: "
+                                     f"{directive.get('blocking_reason', '')}")
+                break
+
+            elif directive_type == "manual_review":
+                action = None
+                state.status = "manual_review_required"
+                state.stop_reason = ("Script 80 requires manual review: "
+                                     f"{directive.get('decision_reason', '')}")
+                break
+
+            else:
+                action = select_next_action()
+
+                append_master_log(master_log_path, ("CONTROLLER FALLBACK | "
+                                                    "No valid Script 80 directive was available. "
+                                                    "Using temporary legacy action selection."), )
+
+                if action is None:
+                    state.status = "complete"
+                    state.stop_reason = ("No controller-authorised or legacy fallback actions remain.")
+                    break
 
             command = action["command"]
 
@@ -943,10 +1207,7 @@ def main(
             ),
         )
 
-        return 0 if state.status in {
-            "complete",
-            "stopped_by_limit",
-        } else 1
+        return 0 if state.status in {"complete", "stopped_by_limit", "stopped_by_controller", } else 1
 
     except KeyboardInterrupt:
         state.status = "interrupted"
