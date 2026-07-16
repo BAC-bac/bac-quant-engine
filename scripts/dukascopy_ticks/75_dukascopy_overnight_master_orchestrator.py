@@ -86,6 +86,11 @@ MORNING_REPORT_SCRIPT = Path(
     "scripts/dukascopy_ticks/77_dukascopy_morning_intelligence_report.py"
 )
 
+RESEARCH_JOURNAL_SCRIPT = Path(
+    "scripts/dukascopy_ticks/"
+    "81_dukascopy_autonomous_research_journal.py"
+)
+
 EXECUTION_CONTROLLER_SCRIPT = Path(
     "scripts/dukascopy_ticks/"
     "80_dukascopy_autonomous_execution_controller.py"
@@ -516,6 +521,47 @@ def generate_morning_report(
     if return_code != 0:
         raise RuntimeError(
             "Morning intelligence report failed with "
+            f"return code {return_code}."
+        )
+
+
+def generate_research_journal(
+    run_id: str,
+    master_log_path: Path,
+    dry_run: bool,
+) -> None:
+    """
+    Generate the autonomous research journal after the morning
+    intelligence report has completed.
+
+    Script 81 should run only after Script 77 so it can record the
+    final morning status and recommendation.
+    """
+
+    script_path = PROJECT_ROOT / RESEARCH_JOURNAL_SCRIPT
+
+    if not script_path.exists():
+        raise FileNotFoundError(
+            f"Missing autonomous research journal script: {script_path}"
+        )
+
+    command = f"python {RESEARCH_JOURNAL_SCRIPT}"
+
+    log_path = (
+        LOG_ROOT
+        / f"{run_id}_final_autonomous_research_journal.log"
+    )
+
+    return_code, _ = run_streaming_command(
+        command=command,
+        log_path=log_path,
+        master_log_path=master_log_path,
+        dry_run=dry_run,
+    )
+
+    if return_code != 0:
+        raise RuntimeError(
+            "Autonomous research journal failed with "
             f"return code {return_code}."
         )
 
@@ -1193,6 +1239,8 @@ def main(
         write_report(state, records)
 
         generate_morning_report(run_id=run_id, master_log_path=master_log_path, dry_run=dry_run, )
+
+        generate_research_journal(run_id=run_id, master_log_path=master_log_path, dry_run=dry_run, )
 
         append_master_log(
             master_log_path,
