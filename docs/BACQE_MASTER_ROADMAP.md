@@ -557,3 +557,43 @@ This monitoring cadence is intended to reduce unnecessary storage load while pre
 Future improvement:
 
 Refactor the hourly Sentinel Suite so it performs only lightweight heartbeat checks, while the full recursive freshness audit remains a daily or weekly process depending on storage growth and infrastructure capacity.
+
+
+EH14 v1.2.0
+175 candidate rows
+22 edge families
+7.4556 effective priority families
+6 orphan families
+
+EH15 v1.0.0
+1 historical snapshot
+22 family observations
+append-safe longitudinal memory established
+
+EH16 v1.0.0
+insufficient_history status
+0 evolution events
+ready to activate automatically after the next changed EH14 snapshot
+
+EH17 v1.0.0
+Discovery Science orchestration established
+dependency-aware execution
+append-only execution ledger
+baseline-established status handling
+
+EH18 v1.0.0
+22 family attribution records
+baseline attribution schema established
+scientifically honest insufficient_history handling
+ready to activate automatically after the second EH15 snapshot
+
+EH19 – Research Recommendation Engine            ✅ Complete
+    Institutional prioritisation of discovered edge families.
+    Produces deterministic research queues, thematic rankings,
+    recommendation reports and evidence-backed next-step actions.
+
+EH20 – Experiment Registry Engine                ✅ Complete
+    Canonical institutional registry of all BACQE research
+    experiments. Maintains deterministic experiment identities,
+    lifecycle management, provenance, historical snapshots and
+    append-safe registry updates.
