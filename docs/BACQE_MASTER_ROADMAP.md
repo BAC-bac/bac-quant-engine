@@ -597,3 +597,31 @@ EH20 – Experiment Registry Engine                ✅ Complete
     experiments. Maintains deterministic experiment identities,
     lifecycle management, provenance, historical snapshots and
     append-safe registry updates.
+
+
+Convex Survival Research
+
+✅ CS01 – Filter Attribution Ingestion
+
+    Validates immutable MQL5 attribution evidence
+    Produces staged Parquet datasets
+    Generates ingestion audit and lineage reports
+
+✅ CS02 – Filter Attribution Analysis
+
+    Analyses marginal contribution of every decision filter
+    Produces deterministic attribution rankings
+    Generates institutional research recommendations
+    Exports machine-readable research outputs
+
+⬜ CS03 – Candidate Opportunity Analysis
+
+    Prioritise experiments by expected information gain
+    Rank candidate research opportunities
+    Quantify expected research value
+
+⬜ CS04 – Experiment Recommendation Engine
+
+⬜ CS05 – Experiment Registry
+
+⬜ CS06 – Evolution Analytics
