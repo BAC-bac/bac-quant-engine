@@ -625,3 +625,25 @@ Convex Survival Research
 ⬜ CS05 – Experiment Registry
 
 ⬜ CS06 – Evolution Analytics
+
+Convex Survival
+
+Phase I — Institutional Scientific Research Platform
+
+Status: COMPLETE
+
+✓ CS01 Evidence Collection
+✓ CS02 Evidence Attribution
+✓ CS03 Experiment Prioritisation
+✓ CS04 Experiment Design
+✓ CS05 Scientific Governance
+✓ CS06 Experiment Execution Ledger
+✓ CS07 Experiment Evidence Assessment
+✓ CS08 Institutional Research Governance Dashboard
+
+Outcome
+
+A complete governed experimental research platform capable of supporting
+scientific discovery, execution, evidence assessment and institutional
+oversight. Future development transitions from infrastructure engineering to
+governed experimentation, cross-symbol replication and evidence accumulation.
