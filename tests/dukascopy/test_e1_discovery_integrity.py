@@ -61,6 +61,10 @@ def discovery_rows(*, long_return: float, short_return: float, long_win: float, 
                 "expected_files": 2,
                 "input_coverage_status": "complete",
                 "input_dataset_fingerprint": "a" * 64,
+                "lower_threshold": -0.25 - index * 0.01,
+                "upper_threshold": 0.25 + index * 0.01,
+                "threshold_learning_method": "predictor_only_file_q25_q75_v1",
+                "discovery_methodology_version": "extended_horizon_discovery_integrity_e1_v1",
             }
         )
     return pd.DataFrame(rows)

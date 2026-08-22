@@ -1,416 +1,272 @@
-"""
-BACQE DUKASCOPY EXTENDED HORIZONS
-SCRIPT 04 - EXTENDED HORIZON SIGNAL VALIDATION
+"""EH04: replay frozen E1 candidates as post-selection validation evidence."""
 
-Purpose:
-    Validate stable extended-horizon feature candidates by replaying them
-    across the EURJPY extended horizon feature files.
+from __future__ import annotations
 
-Inputs:
-    1. Extended horizon feature files from Script 01
-    2. Stable candidates from Script 03
-
-Outputs:
-    Ranked validation results and report.
-"""
-
-from pathlib import Path
 import argparse
+from hashlib import sha256
+from pathlib import Path
+import re
+import sys
+
 import numpy as np
 import pandas as pd
 
+DUKASCOPY_TICKS_DIR = Path(__file__).resolve().parents[1] / "dukascopy_ticks"
+if str(DUKASCOPY_TICKS_DIR) not in sys.path:
+    sys.path.insert(0, str(DUKASCOPY_TICKS_DIR))
+
+from dukascopy_contract import (  # noqa: E402
+    SYMBOL_METADATA_SCHEMA_VERSION, file_sha256, get_symbol_metadata, registry_fingerprint,
+)
+from dukascopy_feature_contract import (  # noqa: E402
+    FEATURE_ROLE_CONTRACT_VERSION, TARGET_CONTRACT_VERSION, feature_contract_fingerprint,
+    require_predictor, require_target,
+)
+from extended_horizons_e2_contract import (  # noqa: E402
+    EH04_VALIDATION_METHODOLOGY_VERSION, ECONOMIC_UNIT_MODEL, EXECUTION_MODEL,
+    VALIDATION_EVIDENCE_CLASS, candidate_contract_id, normalise_rule, profit_factor,
+    trade_returns,
+)
 
 DEFAULT_SYMBOL = "EURJPY"
 DEFAULT_TOP_N = 75
-
+MIN_TRADES_PER_FILE = 100
 BASE_DIR = Path("E:/Quant_Lab")
-
 FEATURE_ROOT = BASE_DIR / "data" / "processed" / "dukascopy_extended_horizon_features"
-
-STABILITY_ROOT = (
-    BASE_DIR
-    / "data"
-    / "analysis"
-    / "dukascopy_extended_horizons"
-    / "feature_stability"
-)
-
-REPORT_ROOT = (
-    BASE_DIR
-    / "data"
-    / "analysis"
-    / "dukascopy_extended_horizons"
-    / "signal_validation"
-)
-
-QUANTILES = [0.10, 0.20, 0.25, 0.75, 0.80, 0.90]
+STABILITY_ROOT = BASE_DIR / "data" / "analysis" / "dukascopy_extended_horizons" / "feature_stability"
+REPORT_ROOT = BASE_DIR / "data" / "analysis" / "dukascopy_extended_horizons" / "signal_validation"
+DATE_PATTERN = re.compile(r"(\d{4}[-_]\d{2}[-_]\d{2})")
 
 
-def print_header(symbol: str, top_n: int) -> None:
-    print("=" * 90)
-    print("BACQE DUKASCOPY EXTENDED HORIZONS")
-    print("SCRIPT 04 - EXTENDED HORIZON SIGNAL VALIDATION")
-    print("=" * 90)
-    print(f"Symbol:       {symbol}")
-    print(f"Top N:        {top_n}")
-    print(f"Feature root: {FEATURE_ROOT}")
-    print(f"Report root:  {REPORT_ROOT}")
-    print("-" * 90)
+def file_date(path: Path) -> str:
+    matches = sorted(set(DATE_PATTERN.findall(path.name)))
+    if len(matches) != 1:
+        raise ValueError(f"Expected one processing date in {path.name!r}, found {matches}")
+    return matches[0].replace("_", "-")
 
 
 def find_feature_files(symbol: str) -> list[Path]:
     root = FEATURE_ROOT / f"symbol={symbol}"
-
     if not root.exists():
         raise FileNotFoundError(f"Missing feature folder: {root}")
-
     files = sorted(root.rglob("*.parquet"))
-
     if not files:
         raise FileNotFoundError(f"No parquet files found under: {root}")
-
     return files
 
 
 def load_candidates(symbol: str, top_n: int) -> pd.DataFrame:
     path = STABILITY_ROOT / f"{symbol.lower()}_extended_horizon_stable_candidates_latest.csv"
-
     if not path.exists():
         raise FileNotFoundError(f"Missing Script 03 stable candidates file: {path}")
-
-    df = pd.read_csv(path)
-
-    if df.empty:
-        raise ValueError("Stable candidates file is empty.")
-
-    df = df.sort_values("stability_score", ascending=False).head(top_n).copy()
-
-    required = ["target", "feature", "best_side", "stability_score", "stability_status"]
-    missing = [col for col in required if col not in df.columns]
-
+    frame = pd.read_csv(path)
+    if frame.empty:
+        raise ValueError("Stable candidates file is empty")
+    required = {
+        "target", "feature", "selected_side", "threshold_quantile", "threshold_side",
+        "learned_threshold_value", "threshold_learning_method", "discovery_methodology_version",
+        "input_dataset_fingerprint", "stability_score", "stability_status",
+    }
+    missing = sorted(required - set(frame.columns))
     if missing:
-        raise ValueError(f"Stable candidates file missing required columns: {missing}")
-
-    return df
-
-
-def safe_profit_factor(returns: pd.Series) -> float:
-    wins = returns[returns > 0].sum()
-    losses = returns[returns < 0].sum()
-
-    if losses == 0:
-        return np.inf if wins > 0 else np.nan
-
-    return float(wins / abs(losses))
+        raise ValueError(f"Stable candidates file lacks frozen E1 fields: {missing}")
+    for row in frame.to_dict("records"):
+        rule = normalise_rule(row)
+        require_predictor(rule["feature"])
+        require_target(rule["target"], approved_extra_targets=[rule["target"]])
+        expected_id = candidate_contract_id(row)
+        if "candidate_contract_id" in frame and str(row["candidate_contract_id"]) != expected_id:
+            raise ValueError("Candidate contract ID does not match the frozen rule")
+    return frame.sort_values("stability_score", ascending=False).head(top_n).copy()
 
 
-def safe_expectancy(returns: pd.Series) -> float:
-    if len(returns) == 0:
-        return np.nan
-
-    return float(returns.mean())
+def _return_stats(prefix: str, values: pd.Series | None) -> dict:
+    if values is None or len(values) == 0:
+        return {
+            f"{prefix}_trades": 0, f"{prefix}_win_rate": np.nan,
+            f"{prefix}_avg_return": np.nan, f"{prefix}_median_return": np.nan,
+            f"{prefix}_total_return": np.nan, f"{prefix}_profit_factor": np.nan,
+        }
+    clean = pd.to_numeric(values, errors="coerce").dropna()
+    return {
+        f"{prefix}_trades": int(len(clean)), f"{prefix}_win_rate": float((clean > 0).mean()),
+        f"{prefix}_avg_return": float(clean.mean()), f"{prefix}_median_return": float(clean.median()),
+        f"{prefix}_total_return": float(clean.sum()), f"{prefix}_profit_factor": profit_factor(clean),
+    }
 
 
 def validate_candidate_on_file(
-    df: pd.DataFrame,
-    feature: str,
-    target: str,
-    candidate_side: str,
-    file_path: Path,
-) -> list[dict]:
-
-    if feature not in df.columns or target not in df.columns:
-        return []
-
-    data = df[[feature, target]].replace([np.inf, -np.inf], np.nan).dropna()
-
-    if len(data) < 500:
-        return []
-
-    feature_series = data[feature]
-    target_series = data[target]
-
-    if feature_series.nunique(dropna=True) <= 1:
-        return []
-
-    thresholds = feature_series.quantile(QUANTILES).to_dict()
-
-    rows = []
-
-    for q, threshold in thresholds.items():
-
-        if q < 0.5:
-            signal_mask = feature_series <= threshold
-            threshold_side = "lower"
-        else:
-            signal_mask = feature_series >= threshold
-            threshold_side = "upper"
-
-        signal_target_returns = target_series[signal_mask]
-
-        if candidate_side == "short":
-            trade_returns = -signal_target_returns
-        else:
-            trade_returns = signal_target_returns
-
-        trade_returns = trade_returns.dropna()
-
-        if len(trade_returns) < 100:
-            continue
-
-        rows.append(
-            {
-                "file": str(file_path),
-                "filename": file_path.name,
-                "feature": feature,
-                "target": target,
-                "candidate_side": candidate_side,
-                "threshold_quantile": q,
-                "threshold_side": threshold_side,
-                "threshold_value": float(threshold),
-                "trades": int(len(trade_returns)),
-                "win_rate": float((trade_returns > 0).mean()),
-                "avg_return": float(trade_returns.mean()),
-                "median_return": float(trade_returns.median()),
-                "total_return": float(trade_returns.sum()),
-                "profit_factor": safe_profit_factor(trade_returns),
-                "expectancy": safe_expectancy(trade_returns),
-                "max_return": float(trade_returns.max()),
-                "min_return": float(trade_returns.min()),
-            }
-        )
-
-    return rows
+    df: pd.DataFrame, candidate: dict, file_path: Path, *,
+    min_trades: int = MIN_TRADES_PER_FILE, input_file_sha256: str = "",
+) -> dict:
+    """Evaluate one immutable E1 rule; no quantile is learned here."""
+    rule = normalise_rule(candidate)
+    base = {
+        "file": str(file_path), "filename": file_path.name, "file_date": file_date(file_path), **rule,
+        "candidate_contract_id": candidate_contract_id(candidate),
+        "threshold_learning_method": str(candidate["threshold_learning_method"]),
+        "threshold_provenance": str(candidate.get("threshold_provenance", "frozen_e1_candidate")),
+        "selected_side_provenance": str(candidate.get("selected_side_method", "e1_stability_selection")),
+        "discovery_methodology_version": str(candidate["discovery_methodology_version"]),
+        "stability_methodology_version": str(candidate.get("stability_methodology_version", "")),
+        "input_dataset_fingerprint": str(candidate["input_dataset_fingerprint"]),
+        "evaluation_dataset_fingerprint": str(candidate.get("evaluation_dataset_fingerprint", "")),
+        "discovery_interval_start": str(candidate.get("discovery_interval_start", "")),
+        "discovery_interval_end": str(candidate.get("discovery_interval_end", "")),
+        "input_file_sha256": input_file_sha256,
+        "validation_evidence_class": VALIDATION_EVIDENCE_CLASS,
+        "validation_methodology_version": EH04_VALIDATION_METHODOLOGY_VERSION,
+        "economic_unit_model": ECONOMIC_UNIT_MODEL, "execution_model": EXECUTION_MODEL,
+        "symbol_metadata_schema_version": SYMBOL_METADATA_SCHEMA_VERSION,
+        "symbol_registry_fingerprint": registry_fingerprint(),
+        "feature_role_contract_version": FEATURE_ROLE_CONTRACT_VERSION,
+        "target_contract_version": TARGET_CONTRACT_VERSION,
+        "feature_contract_fingerprint": feature_contract_fingerprint(),
+        "stability_score": candidate.get("stability_score", np.nan),
+        "stability_status": candidate.get("stability_status", ""),
+    }
+    try:
+        gross, executable, signal_mask = trade_returns(df, candidate, spread_multiplier=1.0)
+        stats = {**_return_stats("gross_mid", gross), **_return_stats("executable", executable)}
+        execution_status = "executable_observed_bid_ask" if executable is not None else "execution_unavailable_missing_bid_ask"
+        status, reason = "success", ""
+        if len(gross) < min_trades:
+            status, reason = "skipped", f"gross_trades_below_{min_trades}"
+        stats.update({
+            "trades": stats["gross_mid_trades"], "win_rate": stats["gross_mid_win_rate"],
+            "avg_return": stats["gross_mid_avg_return"], "median_return": stats["gross_mid_median_return"],
+            "total_return": stats["gross_mid_total_return"], "profit_factor": stats["gross_mid_profit_factor"],
+            "expectancy": stats["gross_mid_avg_return"],
+        })
+        return {
+            **base, **stats, "signal_rows": int(signal_mask.sum()),
+            "evaluation_status": status, "skip_reason": reason,
+            "execution_evidence_status": execution_status,
+        }
+    except Exception as exc:
+        return {
+            **base, **_return_stats("gross_mid", None), **_return_stats("executable", None),
+            "trades": 0, "win_rate": np.nan, "avg_return": np.nan, "median_return": np.nan,
+            "total_return": np.nan, "profit_factor": np.nan, "expectancy": np.nan,
+            "signal_rows": 0, "evaluation_status": "failed",
+            "skip_reason": f"{type(exc).__name__}:{exc}",
+            "execution_evidence_status": "execution_unavailable_evaluation_failed",
+        }
 
 
-def aggregate_validation(raw: pd.DataFrame) -> pd.DataFrame:
+def aggregate_validation(raw: pd.DataFrame, expected_files: int | None = None) -> pd.DataFrame:
     if raw.empty:
         return raw
-
-    grouped = (
-        raw.groupby(
-            [
-                "target",
-                "feature",
-                "candidate_side",
-                "threshold_quantile",
-                "threshold_side",
-            ],
-            dropna=False,
-        )
-        .agg(
-            files_tested=("file", "nunique"),
-            total_trades=("trades", "sum"),
-            mean_win_rate=("win_rate", "mean"),
-            median_win_rate=("win_rate", "median"),
-            mean_avg_return=("avg_return", "mean"),
-            median_avg_return=("avg_return", "median"),
-            total_return=("total_return", "sum"),
-            mean_profit_factor=("profit_factor", "mean"),
-            median_profit_factor=("profit_factor", "median"),
-            mean_expectancy=("expectancy", "mean"),
-            median_expectancy=("expectancy", "median"),
-            worst_file_return=("total_return", "min"),
-            best_file_return=("total_return", "max"),
-        )
-        .reset_index()
+    identity = [
+        "target", "feature", "candidate_side", "threshold_quantile", "threshold_side",
+        "threshold_operator", "learned_threshold_value", "candidate_contract_id",
+    ]
+    grouped = raw.groupby(identity, dropna=False).agg(
+        attempted_files=("file", "nunique"),
+        successful_files=("evaluation_status", lambda s: int((s == "success").sum())),
+        failed_files=("evaluation_status", lambda s: int((s == "failed").sum())),
+        skipped_files=("evaluation_status", lambda s: int((s == "skipped").sum())),
+        total_trades=("gross_mid_trades", "sum"), mean_win_rate=("gross_mid_win_rate", "mean"),
+        median_win_rate=("gross_mid_win_rate", "median"), mean_avg_return=("gross_mid_avg_return", "mean"),
+        median_avg_return=("gross_mid_avg_return", "median"), total_return=("gross_mid_total_return", "sum"),
+        median_profit_factor=("gross_mid_profit_factor", "median"),
+        executable_total_return=("executable_total_return", lambda s: s.sum(min_count=1)),
+        executable_median_avg_return=("executable_avg_return", "median"),
+        executable_median_win_rate=("executable_win_rate", "median"),
+        executable_median_profit_factor=("executable_profit_factor", "median"),
+        validation_evidence_class=("validation_evidence_class", "first"),
+        validation_methodology_version=("validation_methodology_version", "first"),
+        discovery_methodology_version=("discovery_methodology_version", "first"),
+        input_dataset_fingerprint=("input_dataset_fingerprint", "first"),
+        evaluation_dataset_fingerprint=("evaluation_dataset_fingerprint", "first"),
+        threshold_learning_method=("threshold_learning_method", "first"),
+        execution_evidence_status=("execution_evidence_status", "first"),
+        economic_unit_model=("economic_unit_model", "first"), execution_model=("execution_model", "first"),
+        symbol_metadata_schema_version=("symbol_metadata_schema_version", "first"),
+        symbol_registry_fingerprint=("symbol_registry_fingerprint", "first"),
+        feature_role_contract_version=("feature_role_contract_version", "first"),
+        target_contract_version=("target_contract_version", "first"),
+        feature_contract_fingerprint=("feature_contract_fingerprint", "first"),
+        earliest_processed_date=("file_date", "min"), latest_processed_date=("file_date", "max"),
+    ).reset_index()
+    grouped["expected_files"] = int(expected_files if expected_files is not None else raw["file"].nunique())
+    grouped["files_tested"] = grouped["successful_files"]
+    grouped["coverage_status"] = np.where(
+        (grouped["attempted_files"] == grouped["expected_files"])
+        & (grouped["successful_files"] == grouped["expected_files"])
+        & (grouped["failed_files"] == 0) & (grouped["skipped_files"] == 0), "complete", "incomplete",
     )
-
     grouped["validation_score"] = (
         (grouped["mean_win_rate"].fillna(0.5) - 0.5) * 100
         + grouped["mean_avg_return"].fillna(0) * 100000
         + np.log1p(grouped["total_trades"].fillna(0)) * 2
         + grouped["median_profit_factor"].replace([np.inf, -np.inf], np.nan).fillna(0)
     )
-
+    complete = grouped["coverage_status"] == "complete"
     grouped["validation_status"] = np.select(
-        [
-            (grouped["total_trades"] >= 10_000)
-            & (grouped["median_win_rate"] > 0.52)
-            & (grouped["median_avg_return"] > 0)
-            & (grouped["median_profit_factor"] > 1.05),
-
-            (grouped["total_trades"] >= 10_000)
-            & (grouped["median_win_rate"] > 0.505)
-            & (grouped["median_avg_return"] > 0),
-
-            grouped["total_trades"] < 10_000,
-        ],
-        [
-            "validation_pass_primary",
-            "validation_pass_secondary",
-            "insufficient_trades",
-        ],
+        [~complete,
+         (grouped["total_trades"] >= 10_000) & (grouped["median_win_rate"] > 0.52)
+         & (grouped["median_avg_return"] > 0) & (grouped["median_profit_factor"] > 1.05),
+         (grouped["total_trades"] >= 10_000) & (grouped["median_win_rate"] > 0.505)
+         & (grouped["median_avg_return"] > 0), grouped["total_trades"] < 10_000],
+        ["validation_incomplete", "validation_pass_primary", "validation_pass_secondary", "insufficient_trades"],
         default="validation_fail",
     )
-
-    grouped = grouped.sort_values(
-        by=[
-            "validation_status",
-            "validation_score",
-            "median_win_rate",
-            "median_avg_return",
-            "median_profit_factor",
-        ],
-        ascending=[True, False, False, False, False],
-    )
-
-    return grouped
+    return grouped.sort_values(["validation_status", "validation_score"], ascending=[True, False])
 
 
-def write_outputs(symbol: str, raw: pd.DataFrame, ranked: pd.DataFrame) -> None:
+def write_outputs(symbol: str, raw: pd.DataFrame, ranked: pd.DataFrame, coverage: pd.DataFrame) -> None:
     REPORT_ROOT.mkdir(parents=True, exist_ok=True)
-
-    raw_path = REPORT_ROOT / f"{symbol.lower()}_extended_horizon_signal_validation_raw_latest.csv"
-    ranked_path = REPORT_ROOT / f"{symbol.lower()}_extended_horizon_signal_validation_ranked_latest.csv"
-    passed_path = REPORT_ROOT / f"{symbol.lower()}_extended_horizon_signal_validation_passed_latest.csv"
-    txt_path = REPORT_ROOT / f"{symbol.lower()}_extended_horizon_signal_validation_report_latest.txt"
-
-    raw.to_csv(raw_path, index=False)
-    ranked.to_csv(ranked_path, index=False)
-
-    passed = ranked[
-        ranked["validation_status"].isin(
-            ["validation_pass_primary", "validation_pass_secondary"]
-        )
-    ].copy()
-
-    passed.to_csv(passed_path, index=False)
-
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write("BACQE DUKASCOPY EXTENDED HORIZONS\n")
-        f.write("SCRIPT 04 - EXTENDED HORIZON SIGNAL VALIDATION REPORT\n")
-        f.write("=" * 90 + "\n")
-        f.write(f"Symbol: {symbol}\n")
-        f.write(f"Raw validation rows: {len(raw)}\n")
-        f.write(f"Ranked validation rows: {len(ranked)}\n")
-        f.write(f"Passed candidates: {len(passed)}\n\n")
-
-        if not ranked.empty:
-            f.write("STATUS COUNTS\n")
-            f.write("-" * 90 + "\n")
-            f.write(ranked["validation_status"].value_counts().to_string())
-            f.write("\n\n")
-
-            display_cols = [
-                "target",
-                "feature",
-                "candidate_side",
-                "threshold_quantile",
-                "threshold_side",
-                "validation_status",
-                "validation_score",
-                "total_trades",
-                "median_win_rate",
-                "median_avg_return",
-                "median_profit_factor",
-                "total_return",
-                "files_tested",
-            ]
-
-            f.write("TOP 50 VALIDATED CANDIDATES\n")
-            f.write("-" * 90 + "\n")
-            f.write(ranked[display_cols].head(50).to_string(index=False))
-        else:
-            f.write("No ranked validation rows produced.\n")
-
-    print(f"Raw validation:    {raw_path}")
-    print(f"Ranked validation: {ranked_path}")
-    print(f"Passed candidates: {passed_path}")
-    print(f"Text report:       {txt_path}")
+    prefix = f"{symbol.lower()}_extended_horizon_signal_validation"
+    raw.to_csv(REPORT_ROOT / f"{prefix}_raw_latest.csv", index=False)
+    ranked.to_csv(REPORT_ROOT / f"{prefix}_ranked_latest.csv", index=False)
+    ranked[ranked["validation_status"].isin(["validation_pass_primary", "validation_pass_secondary"])].to_csv(
+        REPORT_ROOT / f"{prefix}_passed_latest.csv", index=False)
+    coverage.to_csv(REPORT_ROOT / f"{prefix}_coverage_latest.csv", index=False)
 
 
 def main(symbol: str, top_n: int) -> None:
-    print_header(symbol, top_n)
-
+    get_symbol_metadata(symbol)
     files = find_feature_files(symbol)
     candidates = load_candidates(symbol, top_n)
-
-    print(f"Feature files found: {len(files):,}")
-    print(f"Candidates loaded:   {len(candidates):,}")
-    print("-" * 90)
-
-    all_rows = []
-
-    candidate_records = candidates.to_dict("records")
-
-    for file_idx, file_path in enumerate(files, start=1):
+    fingerprints = {path: file_sha256(path) for path in files}
+    evaluation_fingerprint = sha256("\n".join(fingerprints[path] for path in files).encode("utf-8")).hexdigest()
+    all_rows: list[dict] = []
+    coverage_rows: list[dict] = []
+    records = candidates.to_dict("records")
+    for path in files:
         try:
-            needed_cols = sorted(
-                set(
-                    [row["feature"] for row in candidate_records]
-                    + [row["target"] for row in candidate_records]
-                )
-            )
-
-            df = pd.read_parquet(file_path, columns=needed_cols)
-
-            file_rows = 0
-
-            for candidate in candidate_records:
-                rows = validate_candidate_on_file(
-                    df=df,
-                    feature=candidate["feature"],
-                    target=candidate["target"],
-                    candidate_side=candidate["best_side"],
-                    file_path=file_path,
-                )
-
-                for row in rows:
-                    row["stability_score"] = candidate["stability_score"]
-                    row["stability_status"] = candidate["stability_status"]
-
-                all_rows.extend(rows)
-                file_rows += len(rows)
-
-            print(
-                f"[OK] {file_idx:>4}/{len(files)} "
-                f"validation_rows={file_rows:>5} "
-                f"file={file_path.name}"
-            )
-
+            columns = pd.read_parquet(path).columns.tolist()
+            needed = sorted({field for row in records for field in (row["feature"], row["target"])} | {"bid", "ask", "mid"})
+            frame = pd.read_parquet(path, columns=[name for name in needed if name in columns])
+            for candidate in records:
+                row = validate_candidate_on_file(frame, candidate, path, input_file_sha256=fingerprints[path])
+                row["evaluation_dataset_fingerprint"] = evaluation_fingerprint
+                all_rows.append(row)
+            coverage_rows.append({"file": str(path), "status": "success", "reason": "", "input_file_sha256": fingerprints[path]})
         except Exception as exc:
-            print(f"[ERROR] {file_idx:>4}/{len(files)} {file_path.name} :: {exc}")
-
+            coverage_rows.append({"file": str(path), "status": "failed", "reason": f"{type(exc).__name__}:{exc}", "input_file_sha256": fingerprints[path]})
+            for candidate in records:
+                row = validate_candidate_on_file(pd.DataFrame(), candidate, path, input_file_sha256=fingerprints[path])
+                row["evaluation_dataset_fingerprint"] = evaluation_fingerprint
+                all_rows.append(row)
     raw = pd.DataFrame(all_rows)
-    ranked = aggregate_validation(raw)
-
-    print("-" * 90)
-    print(f"Raw validation rows:    {len(raw):,}")
-    print(f"Ranked validation rows: {len(ranked):,}")
-
-    if not ranked.empty:
-        print("Validation status counts:")
-        print(ranked["validation_status"].value_counts())
-
-    print("-" * 90)
-
-    write_outputs(symbol, raw, ranked)
-
-    print("-" * 90)
-    print("[DONE] Extended horizon signal validation complete")
-    print("=" * 90)
+    raw["expected_files"] = len(files)
+    raw["attempted_files"] = raw.groupby("candidate_contract_id")["file"].transform("nunique")
+    raw["successful_files"] = raw.groupby("candidate_contract_id")["evaluation_status"].transform(lambda s: int((s == "success").sum()))
+    raw["failed_files"] = raw.groupby("candidate_contract_id")["evaluation_status"].transform(lambda s: int((s == "failed").sum()))
+    raw["skipped_files"] = raw.groupby("candidate_contract_id")["evaluation_status"].transform(lambda s: int((s == "skipped").sum()))
+    raw["coverage_status"] = np.where(
+        (raw["attempted_files"] == raw["expected_files"])
+        & (raw["successful_files"] == raw["expected_files"])
+        & (raw["failed_files"] == 0) & (raw["skipped_files"] == 0), "complete", "incomplete"
+    )
+    write_outputs(symbol, raw, aggregate_validation(raw, len(files)), pd.DataFrame(coverage_rows))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--symbol",
-        default=DEFAULT_SYMBOL,
-        help="Symbol to process, e.g. EURJPY",
-    )
-
-    parser.add_argument(
-        "--top-n",
-        type=int,
-        default=DEFAULT_TOP_N,
-        help="Number of stable candidates to validate",
-    )
-
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    parser.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
     args = parser.parse_args()
-
-    main(
-        symbol=args.symbol.upper(),
-        top_n=args.top_n,
-    )
+    main(args.symbol.upper(), args.top_n)

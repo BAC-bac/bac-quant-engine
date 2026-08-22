@@ -30,6 +30,11 @@ from dukascopy_feature_contract import (  # noqa: E402
     require_predictor,
     require_target,
 )
+from dukascopy_contract import (  # noqa: E402
+    SYMBOL_METADATA_SCHEMA_VERSION,
+    registry_fingerprint,
+)
+from extended_horizons_e2_contract import candidate_contract_id  # noqa: E402
 
 
 DEFAULT_SYMBOL = "EURJPY"
@@ -154,6 +159,10 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
         "expected_files",
         "input_coverage_status",
         "input_dataset_fingerprint",
+        "lower_threshold",
+        "upper_threshold",
+        "threshold_learning_method",
+        "discovery_methodology_version",
     ]
 
     missing = [col for col in required_cols if col not in df.columns]
@@ -200,6 +209,12 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
             total_short_return_sum=("short_return_sum", "sum"),
             expected_files=("expected_files", "max"),
             input_dataset_fingerprint=("input_dataset_fingerprint", "first"),
+            median_lower_threshold=("lower_threshold", "median"),
+            median_upper_threshold=("upper_threshold", "median"),
+            threshold_learning_method=("threshold_learning_method", "first"),
+            discovery_methodology_version=("discovery_methodology_version", "first"),
+            discovery_interval_start=("file_date", "min"),
+            discovery_interval_end=("file_date", "max"),
         )
         .reset_index()
     )
@@ -252,6 +267,19 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
     )
     grouped["selected_count"] = np.where(is_long, grouped["total_long_count"], grouped["total_short_count"])
 
+    # E2 freezes the numerical E1 rule. Each file-level Q25/Q75 was learned
+    # from predictor values only; the median boundary is a deterministic
+    # corpus-level rule and is never recomputed by EH04 evaluation data.
+    grouped["threshold_quantile"] = np.where(is_long, 0.75, 0.25)
+    grouped["threshold_side"] = np.where(is_long, "upper", "lower")
+    grouped["threshold_operator"] = np.where(is_long, ">=", "<=")
+    grouped["learned_threshold_value"] = np.where(
+        is_long, grouped["median_upper_threshold"], grouped["median_lower_threshold"]
+    )
+    grouped["threshold_value"] = grouped["learned_threshold_value"]
+    grouped["threshold_value_unit"] = "feature_native_numeric_units"
+    grouped["threshold_provenance"] = "median_of_e1_file_feature_only_q25_q75"
+
     # EH04 compatibility aliases, now guaranteed to describe selected_side.
     grouped["best_side"] = grouped["selected_side"]
     grouped["best_mean_return"] = grouped["selected_file_balanced_mean_return"]
@@ -288,6 +316,11 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
     grouped["target_contract_version"] = TARGET_CONTRACT_VERSION
     grouped["feature_contract_fingerprint"] = feature_contract_fingerprint()
     grouped["input_coverage_status"] = "complete"
+    grouped["symbol_metadata_schema_version"] = SYMBOL_METADATA_SCHEMA_VERSION
+    grouped["symbol_registry_fingerprint"] = registry_fingerprint()
+    grouped["candidate_contract_id"] = grouped.apply(
+        lambda row: candidate_contract_id(row.to_dict()), axis=1
+    )
 
     grouped["stability_status"] = np.select(
         [
