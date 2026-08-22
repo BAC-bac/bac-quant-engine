@@ -12,15 +12,18 @@ Refactor note:
 
 from pathlib import Path
 import argparse
+from hashlib import sha256
 import warnings
 
 import numpy as np
 import pandas as pd
 
 from dukascopy_feature_contract import (
-    APPROVED_TARGET_PRICE_BASIS,
+    FEATURE_ROLE_CONTRACT_VERSION,
+    TARGET_CONTRACT_VERSION,
     FeatureContractError,
     column_spec,
+    feature_contract_fingerprint,
     predictor_columns,
     require_target,
 )
@@ -45,6 +48,8 @@ FORWARD_WINDOWS = [1, 3, 5, 10, 20]
 RUN_MUTUAL_INFO = False
 MAX_ROWS_PER_DATASET = 10_000
 MIN_VALID_ROWS = 1_000
+DISCOVERY_METHODOLOGY_VERSION = "dukascopy_discovery_integrity_e1_v1"
+RANKING_INTERPRETATION = "exploratory_ranking_index_not_independent_validation"
 
 EXCLUDE_COLS = {
     "timestamp",
@@ -149,26 +154,34 @@ def find_timestamp_col(df: pd.DataFrame) -> str | None:
     return None
 
 
-def find_price_col(df: pd.DataFrame) -> str | None:
-    if (
-        APPROVED_TARGET_PRICE_BASIS in df.columns
-        and pd.api.types.is_numeric_dtype(df[APPROVED_TARGET_PRICE_BASIS])
-    ):
-        return APPROVED_TARGET_PRICE_BASIS
-    return None
+def approved_target_columns() -> list[str]:
+    targets = [f"future_return_{window}" for window in FORWARD_WINDOWS]
+    for target in targets:
+        require_target(target, approved_extra_targets=targets)
+    return targets
 
 
-def create_forward_returns(df: pd.DataFrame, price_col: str) -> pd.DataFrame:
-    df = df.copy()
-
-    for window in FORWARD_WINDOWS:
-        target = f"future_return_{window}"
-        require_target(target, approved_extra_targets=[target])
-        df[target] = (
-            df[price_col].shift(-window) / df[price_col] - 1
+def require_approved_targets(df: pd.DataFrame) -> list[str]:
+    """Require canonical continuous targets; never construct file-local labels."""
+    targets = approved_target_columns()
+    missing = [target for target in targets if target not in df.columns]
+    if missing:
+        raise FeatureContractError(
+            "Script 22 requires precomputed D2 continuous event-time targets; "
+            f"file-local shift(-n) target construction is forbidden. Missing: {missing}"
         )
+    for target in targets:
+        if not pd.api.types.is_numeric_dtype(df[target]):
+            raise FeatureContractError(f"Approved target {target!r} is not numeric")
+    return targets
 
-    return df
+
+def file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def build_feature_inventory(df: pd.DataFrame, dataset_name: str, symbol: str) -> pd.DataFrame:
@@ -244,13 +257,7 @@ def calculate_mutual_info(x: pd.Series, y: pd.Series) -> float:
 
 def score_features(df: pd.DataFrame, dataset_name: str, symbol: str) -> pd.DataFrame:
     feature_cols = get_feature_columns(df)
-    target_cols = [
-        f"future_return_{window}"
-        for window in FORWARD_WINDOWS
-        if f"future_return_{window}" in df.columns
-    ]
-    for target in target_cols:
-        require_target(target, approved_extra_targets=target_cols)
+    target_cols = require_approved_targets(df)
 
     rows = []
 
@@ -269,6 +276,10 @@ def score_features(df: pd.DataFrame, dataset_name: str, symbol: str) -> pd.DataF
                 "pvalue": pvalue,
                 "mutual_info": mi,
                 "valid_rows": pd.concat([df[feature], df[target]], axis=1).dropna().shape[0],
+                "discovery_methodology_version": DISCOVERY_METHODOLOGY_VERSION,
+                "feature_role_contract_version": FEATURE_ROLE_CONTRACT_VERSION,
+                "target_contract_version": TARGET_CONTRACT_VERSION,
+                "feature_contract_fingerprint": feature_contract_fingerprint(),
             })
 
     return pd.DataFrame(rows)
@@ -354,13 +365,19 @@ def build_final_rankings(scores: pd.DataFrame, stability: pd.DataFrame) -> pd.Da
         else:
             rankings[f"{col}_norm"] = 0
 
-    rankings["feature_discovery_score"] = (
+    rankings["feature_discovery_ranking_index"] = (
         rankings["abs_spearman_norm"].fillna(0) * 0.45
         + rankings["mutual_info_norm"].fillna(0) * 0.35
         + rankings["stability_score_norm"].fillna(0) * 0.20
     )
+    rankings["feature_discovery_score"] = rankings["feature_discovery_ranking_index"]
+    rankings["ranking_interpretation"] = RANKING_INTERPRETATION
 
-    rankings = rankings.sort_values("feature_discovery_score", ascending=False)
+    rankings = rankings.sort_values(
+        ["feature_discovery_ranking_index", "dataset", "feature", "target"],
+        ascending=[False, True, True, True],
+        kind="mergesort",
+    )
     rankings.insert(0, "rank", range(1, len(rankings) + 1))
 
     return rankings
@@ -447,6 +464,7 @@ def run_feature_discovery(symbol: str = DEFAULT_SYMBOL) -> dict:
     all_inventory = []
     all_scores = []
     all_stability = []
+    coverage_rows = []
 
     for i, path in enumerate(discovered_files, start=1):
         dataset_name = path.stem
@@ -459,23 +477,24 @@ def run_feature_discovery(symbol: str = DEFAULT_SYMBOL) -> dict:
 
             if df.empty:
                 print("[SKIP] Empty dataset.")
+                coverage_rows.append({"file": str(path), "status": "skipped", "reason": "empty_dataset"})
                 continue
 
             timestamp_col = find_timestamp_col(df)
-            price_col = find_price_col(df)
-
-            if price_col is None:
-                print("[SKIP] No usable price column found.")
-                continue
 
             if timestamp_col:
                 df = df.sort_values(timestamp_col)
 
-            df = create_forward_returns(df, price_col)
+            require_approved_targets(df)
 
             inventory = build_feature_inventory(df, dataset_name, symbol)
             scores = score_features(df, dataset_name, symbol)
             stability = calculate_stability(df, dataset_name, symbol, timestamp_col)
+            fingerprint = file_sha256(path)
+            inventory["input_file_sha256"] = fingerprint
+            scores["input_file_sha256"] = fingerprint
+            if not stability.empty:
+                stability["input_file_sha256"] = fingerprint
 
             all_inventory.append(inventory)
 
@@ -485,8 +504,20 @@ def run_feature_discovery(symbol: str = DEFAULT_SYMBOL) -> dict:
             if not stability.empty:
                 all_stability.append(stability)
 
+            timestamps = (
+                pd.to_datetime(df[timestamp_col], utc=True, errors="coerce")
+                if timestamp_col else pd.Series(dtype="datetime64[ns, UTC]")
+            )
+            coverage_rows.append({
+                "file": str(path),
+                "status": "success",
+                "reason": "",
+                "input_file_sha256": fingerprint,
+                "earliest_timestamp": timestamps.min() if not timestamps.empty else pd.NaT,
+                "latest_timestamp": timestamps.max() if not timestamps.empty else pd.NaT,
+            })
+
             print(f"Rows:        {len(df):,}")
-            print(f"Price col:   {price_col}")
             print(f"Time col:    {timestamp_col}")
             print(f"Features:    {len(get_feature_columns(df))}")
             print(f"Score rows:  {len(scores)}")
@@ -494,6 +525,29 @@ def run_feature_discovery(symbol: str = DEFAULT_SYMBOL) -> dict:
         except Exception as e:
             print(f"[ERROR] {path}")
             print(f"        {e}")
+            coverage_rows.append({"file": str(path), "status": "failed", "reason": str(e)})
+
+    coverage_df = pd.DataFrame(coverage_rows)
+    successful_files = int((coverage_df["status"] == "success").sum()) if not coverage_df.empty else 0
+    failed_files = int((coverage_df["status"] == "failed").sum()) if not coverage_df.empty else 0
+    skipped_files = int((coverage_df["status"] == "skipped").sum()) if not coverage_df.empty else 0
+    coverage_complete = successful_files == len(discovered_files) and failed_files == skipped_files == 0
+    coverage_path = report_root / "reports" / f"{symbol}_feature_discovery_coverage_latest.csv"
+    coverage_df.to_csv(coverage_path, index=False)
+
+    if not coverage_complete:
+        print("[STOP] Incomplete input coverage; normal discovery outputs were not written.")
+        return {
+            "status": "incomplete_coverage",
+            "symbol": symbol,
+            "expected_files": len(discovered_files),
+            "attempted_files": len(coverage_rows),
+            "successful_files": successful_files,
+            "failed_files": failed_files,
+            "skipped_files": skipped_files,
+            "coverage_rate": successful_files / len(discovered_files),
+            "coverage_path": str(coverage_path),
+        }
 
     if not all_inventory:
         print("[STOP] No inventory generated.")
@@ -565,6 +619,12 @@ def run_feature_discovery(symbol: str = DEFAULT_SYMBOL) -> dict:
         "status": "ok",
         "symbol": symbol,
         "files": len(discovered_files),
+        "expected_files": len(discovered_files),
+        "attempted_files": len(coverage_rows),
+        "successful_files": successful_files,
+        "failed_files": failed_files,
+        "skipped_files": skipped_files,
+        "coverage_rate": 1.0,
         "inventory_path": str(inventory_path),
         "scores_path": str(scores_path),
         "rankings_path": str(rankings_path),

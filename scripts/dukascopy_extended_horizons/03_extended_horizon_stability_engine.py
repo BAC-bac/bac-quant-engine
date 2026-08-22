@@ -15,8 +15,21 @@ Pilot:
 
 from pathlib import Path
 import argparse
+import sys
 import numpy as np
 import pandas as pd
+
+DUKASCOPY_TICKS_DIR = Path(__file__).resolve().parents[1] / "dukascopy_ticks"
+if str(DUKASCOPY_TICKS_DIR) not in sys.path:
+    sys.path.insert(0, str(DUKASCOPY_TICKS_DIR))
+
+from dukascopy_feature_contract import (  # noqa: E402
+    FEATURE_ROLE_CONTRACT_VERSION,
+    TARGET_CONTRACT_VERSION,
+    feature_contract_fingerprint,
+    require_predictor,
+    require_target,
+)
 
 
 DEFAULT_SYMBOL = "EURJPY"
@@ -41,6 +54,9 @@ REPORT_ROOT = (
 
 MIN_FILES_TESTED = 20
 MIN_TOTAL_SIDE_COUNT = 1_000
+STABILITY_METHODOLOGY_VERSION = "extended_horizon_stability_integrity_e1_v1"
+SELECTED_SIDE_METHOD = "higher_file_balanced_mean_directional_return_v1"
+RANKING_INTERPRETATION = "exploratory_stability_ranking_index_not_independent_validation"
 
 
 def print_header(symbol: str) -> None:
@@ -56,6 +72,11 @@ def print_header(symbol: str) -> None:
 
 def load_discovery_raw(symbol: str) -> pd.DataFrame:
     path = DISCOVERY_ROOT / f"{symbol.lower()}_extended_horizon_feature_discovery_raw_latest.csv"
+    coverage_path = DISCOVERY_ROOT / f"{symbol.lower()}_extended_horizon_feature_discovery_coverage_latest.csv"
+
+    if not coverage_path.exists():
+        raise FileNotFoundError(f"Missing Script 02 coverage ledger: {coverage_path}")
+    validate_discovery_coverage(pd.read_csv(coverage_path))
 
     if not path.exists():
         raise FileNotFoundError(f"Missing Script 02 raw discovery report: {path}")
@@ -71,20 +92,36 @@ def load_discovery_raw(symbol: str) -> pd.DataFrame:
 def add_file_date_if_possible(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    if "filename" not in df.columns:
-        df["file_date"] = "unknown"
-        return df
+    if "file_date" in df.columns:
+        values = df["file_date"].astype("string")
+    elif "filename" in df.columns:
+        values = df["filename"].astype(str).str.extract(r"(\d{4}[-_]\d{2}[-_]\d{2})")[0]
+    else:
+        raise ValueError("Temporal stability requires file_date or a dated filename")
 
-    extracted = df["filename"].astype(str).str.extract(r"(\d{4}[-_]\d{2}[-_]\d{2})")[0]
-
-    df["file_date"] = (
-        extracted
-        .fillna("unknown")
-        .astype(str)
-        .str.replace("_", "-", regex=False)
-    )
+    values = values.astype("string").str.replace("_", "-", regex=False)
+    parsed = pd.to_datetime(values, format="%Y-%m-%d", errors="coerce")
+    if parsed.isna().any():
+        invalid = sorted(set(values[parsed.isna()].fillna("<missing>").astype(str)))
+        raise ValueError(f"Unknown/missing file dates cannot be temporal evidence: {invalid}")
+    df["file_date"] = parsed.dt.strftime("%Y-%m-%d")
 
     return df
+
+
+def validate_discovery_coverage(coverage: pd.DataFrame) -> None:
+    required = {"file", "status", "reason"}
+    missing = sorted(required - set(coverage.columns))
+    if missing:
+        raise ValueError(f"Script 02 coverage ledger missing columns: {missing}")
+    if coverage.empty:
+        raise ValueError("Script 02 coverage ledger is empty")
+    incomplete = coverage[coverage["status"] != "success"]
+    if not incomplete.empty:
+        details = incomplete[["file", "status", "reason"]].to_dict("records")
+        raise ValueError(f"EH03 refuses incomplete Script 02 coverage: {details}")
+    if coverage["file"].nunique() != len(coverage):
+        raise ValueError("Script 02 coverage ledger contains duplicate file records")
 
 
 def safe_positive_rate(series: pd.Series) -> float:
@@ -108,14 +145,30 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
         "short_win_rate",
         "long_avg_return",
         "short_avg_return",
+        "long_positive_count",
+        "short_positive_count",
+        "long_return_sum",
+        "short_return_sum",
         "long_count",
         "short_count",
+        "expected_files",
+        "input_coverage_status",
+        "input_dataset_fingerprint",
     ]
 
     missing = [col for col in required_cols if col not in df.columns]
 
     if missing:
         raise ValueError(f"Missing required columns from Script 02 report: {missing}")
+
+    if not (df["input_coverage_status"] == "complete").all():
+        raise ValueError("EH03 refuses incomplete Script 02 discovery evidence")
+
+    for feature in df["feature"].dropna().unique():
+        require_predictor(str(feature))
+    targets = [str(value) for value in df["target"].dropna().unique()]
+    for target in targets:
+        require_target(target, approved_extra_targets=targets)
 
     grouped = (
         df.groupby(["target", "feature"], dropna=False)
@@ -131,18 +184,40 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
             median_abs_correlation=("abs_correlation", "median"),
             max_abs_correlation=("abs_correlation", "max"),
             positive_corr_rate=("correlation", safe_positive_rate),
-            mean_long_win_rate=("long_win_rate", "mean"),
-            median_long_win_rate=("long_win_rate", "median"),
-            mean_short_win_rate=("short_win_rate", "mean"),
-            median_short_win_rate=("short_win_rate", "median"),
-            mean_long_return=("long_avg_return", "mean"),
-            median_long_return=("long_avg_return", "median"),
-            mean_short_return=("short_avg_return", "mean"),
-            median_short_return=("short_avg_return", "median"),
+            file_balanced_mean_long_win_rate=("long_win_rate", "mean"),
+            file_balanced_median_long_win_rate=("long_win_rate", "median"),
+            file_balanced_mean_short_win_rate=("short_win_rate", "mean"),
+            file_balanced_median_short_win_rate=("short_win_rate", "median"),
+            file_balanced_mean_long_return=("long_avg_return", "mean"),
+            file_balanced_median_long_return=("long_avg_return", "median"),
+            file_balanced_mean_short_return=("short_avg_return", "mean"),
+            file_balanced_median_short_return=("short_avg_return", "median"),
             total_long_count=("long_count", "sum"),
             total_short_count=("short_count", "sum"),
+            total_long_positive_count=("long_positive_count", "sum"),
+            total_short_positive_count=("short_positive_count", "sum"),
+            total_long_return_sum=("long_return_sum", "sum"),
+            total_short_return_sum=("short_return_sum", "sum"),
+            expected_files=("expected_files", "max"),
+            input_dataset_fingerprint=("input_dataset_fingerprint", "first"),
         )
         .reset_index()
+    )
+
+    if not (grouped["files_tested"] == grouped["expected_files"]).all():
+        raise ValueError("EH03 input does not contain complete per-candidate file coverage")
+
+    grouped["row_weighted_long_win_rate"] = (
+        grouped["total_long_positive_count"] / grouped["total_long_count"].replace(0, np.nan)
+    )
+    grouped["row_weighted_short_win_rate"] = (
+        grouped["total_short_positive_count"] / grouped["total_short_count"].replace(0, np.nan)
+    )
+    grouped["row_weighted_long_avg_return"] = (
+        grouped["total_long_return_sum"] / grouped["total_long_count"].replace(0, np.nan)
+    )
+    grouped["row_weighted_short_avg_return"] = (
+        grouped["total_short_return_sum"] / grouped["total_short_count"].replace(0, np.nan)
     )
 
     grouped["corr_direction_consistency"] = np.maximum(
@@ -150,21 +225,44 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
         1.0 - grouped["positive_corr_rate"],
     )
 
-    grouped["best_side"] = np.where(
-        grouped["mean_long_return"] >= grouped["mean_short_return"],
+    grouped["selected_side"] = np.where(
+        grouped["file_balanced_mean_long_return"]
+        >= grouped["file_balanced_mean_short_return"],
         "long",
         "short",
     )
-
-    grouped["best_mean_return"] = grouped[["mean_long_return", "mean_short_return"]].max(axis=1)
-    grouped["best_median_return"] = grouped[["median_long_return", "median_short_return"]].max(axis=1)
-    grouped["best_mean_win_rate"] = grouped[["mean_long_win_rate", "mean_short_win_rate"]].max(axis=1)
-    grouped["best_median_win_rate"] = grouped[["median_long_win_rate", "median_short_win_rate"]].max(axis=1)
-    grouped["best_total_count"] = np.where(
-        grouped["best_side"] == "long",
-        grouped["total_long_count"],
-        grouped["total_short_count"],
+    is_long = grouped["selected_side"] == "long"
+    grouped["selected_file_balanced_mean_return"] = np.where(
+        is_long, grouped["file_balanced_mean_long_return"], grouped["file_balanced_mean_short_return"]
     )
+    grouped["selected_file_balanced_median_return"] = np.where(
+        is_long, grouped["file_balanced_median_long_return"], grouped["file_balanced_median_short_return"]
+    )
+    grouped["selected_file_balanced_mean_win_rate"] = np.where(
+        is_long, grouped["file_balanced_mean_long_win_rate"], grouped["file_balanced_mean_short_win_rate"]
+    )
+    grouped["selected_file_balanced_median_win_rate"] = np.where(
+        is_long, grouped["file_balanced_median_long_win_rate"], grouped["file_balanced_median_short_win_rate"]
+    )
+    grouped["selected_row_weighted_avg_return"] = np.where(
+        is_long, grouped["row_weighted_long_avg_return"], grouped["row_weighted_short_avg_return"]
+    )
+    grouped["selected_row_weighted_win_rate"] = np.where(
+        is_long, grouped["row_weighted_long_win_rate"], grouped["row_weighted_short_win_rate"]
+    )
+    grouped["selected_count"] = np.where(is_long, grouped["total_long_count"], grouped["total_short_count"])
+
+    # EH04 compatibility aliases, now guaranteed to describe selected_side.
+    grouped["best_side"] = grouped["selected_side"]
+    grouped["best_mean_return"] = grouped["selected_file_balanced_mean_return"]
+    grouped["best_median_return"] = grouped["selected_file_balanced_median_return"]
+    grouped["best_mean_win_rate"] = grouped["selected_file_balanced_mean_win_rate"]
+    grouped["best_median_win_rate"] = grouped["selected_file_balanced_median_win_rate"]
+    grouped["best_total_count"] = grouped["selected_count"]
+    grouped["mean_long_return"] = grouped["file_balanced_mean_long_return"]
+    grouped["mean_short_return"] = grouped["file_balanced_mean_short_return"]
+    grouped["mean_long_win_rate"] = grouped["file_balanced_mean_long_win_rate"]
+    grouped["mean_short_win_rate"] = grouped["file_balanced_mean_short_win_rate"]
 
     grouped["return_stability_pass"] = grouped["best_median_return"] > 0
     grouped["win_rate_stability_pass"] = grouped["best_median_win_rate"] > 0.5
@@ -173,7 +271,7 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
         & (grouped["best_total_count"] >= MIN_TOTAL_SIDE_COUNT)
     )
 
-    grouped["stability_score"] = (
+    grouped["stability_ranking_index"] = (
         grouped["mean_abs_correlation"].fillna(0) * 10000
         + grouped["corr_direction_consistency"].fillna(0.5) * 10
         + (grouped["best_mean_win_rate"].fillna(0.5) - 0.5) * 20
@@ -182,6 +280,14 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
         + grouped["win_rate_stability_pass"].astype(int) * 5
         + grouped["sample_size_pass"].astype(int) * 5
     )
+    grouped["stability_score"] = grouped["stability_ranking_index"]
+    grouped["ranking_interpretation"] = RANKING_INTERPRETATION
+    grouped["stability_methodology_version"] = STABILITY_METHODOLOGY_VERSION
+    grouped["selected_side_method"] = SELECTED_SIDE_METHOD
+    grouped["feature_role_contract_version"] = FEATURE_ROLE_CONTRACT_VERSION
+    grouped["target_contract_version"] = TARGET_CONTRACT_VERSION
+    grouped["feature_contract_fingerprint"] = feature_contract_fingerprint()
+    grouped["input_coverage_status"] = "complete"
 
     grouped["stability_status"] = np.select(
         [
@@ -213,8 +319,11 @@ def calculate_stability(df: pd.DataFrame) -> pd.DataFrame:
             "best_mean_return",
             "best_mean_win_rate",
             "mean_abs_correlation",
+            "target",
+            "feature",
         ],
-        ascending=[True, False, False, False, False],
+        ascending=[True, False, False, False, False, True, True],
+        kind="mergesort",
     )
 
     return grouped
@@ -244,6 +353,10 @@ def write_report(symbol: str, stability: pd.DataFrame) -> None:
         f.write(f"Symbol: {symbol}\n")
         f.write(f"Total feature/target pairs: {len(stability)}\n")
         f.write(f"Stable/watchlist candidates: {len(candidates)}\n\n")
+        f.write(f"Stability methodology: {STABILITY_METHODOLOGY_VERSION}\n")
+        f.write(f"Selected side: {SELECTED_SIDE_METHOD}\n")
+        f.write(f"Ranking interpretation: {RANKING_INTERPRETATION}\n")
+        f.write("Status interpretation: exploratory discovery ranking class, not independent validation evidence\n\n")
 
         f.write("STATUS COUNTS\n")
         f.write("-" * 90 + "\n")
