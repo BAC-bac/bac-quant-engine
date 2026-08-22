@@ -1,72 +1,39 @@
-"""
-BACQE DUKASCOPY 30 - HORIZON EXPANSION ENGINE
+"""BACQE DUKASCOPY 30 - continuous event-time forward horizons (D2)."""
 
-Purpose:
-    Add longer forward return horizons to engineered Dukascopy feature datasets.
+from __future__ import annotations
 
-Refactor note:
-    This script can run standalone with CLI arguments and also exposes
-    run_horizon_expansion() for orchestration scripts.
-
-Example:
-    python scripts/dukascopy_ticks/30_horizon_expansion_engine.py --symbol GBPUSD
-"""
-
-from pathlib import Path
 import argparse
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+from dukascopy_feature_contract import (
+    APPROVED_TARGET_PRICE_BASIS,
+    SCRIPT30_FORWARD_HORIZONS,
+    TARGET_CONTRACT_VERSION,
+    require_target,
+    validate_feature_parquet,
+    write_feature_parquet,
+)
 
 
 DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
-
-HORIZONS = [1, 3, 5, 10, 20, 25, 50, 100, 250, 500, 1000]
-MIN_ROWS = 1_500
+HORIZONS = list(SCRIPT30_FORWARD_HORIZONS)
 
 
 def get_input_root(symbol: str) -> Path:
-    symbol = symbol.upper().strip()
-    return (
-        QUANT_LAB
-        / "data"
-        / "processed"
-        / "dukascopy_engineered_features"
-        / f"symbol={symbol}"
-    )
+    return QUANT_LAB / "data" / "processed" / "dukascopy_engineered_features" / f"symbol={symbol.upper().strip()}"
 
 
 def get_output_root(symbol: str) -> Path:
-    symbol = symbol.upper().strip()
-    return (
-        QUANT_LAB
-        / "data"
-        / "processed"
-        / "dukascopy_horizon_features"
-        / f"symbol={symbol}"
-    )
+    return QUANT_LAB / "data" / "processed" / "dukascopy_horizon_features" / f"symbol={symbol.upper().strip()}"
 
 
 def get_report_root(symbol: str) -> Path:
-    symbol = symbol.upper().strip()
-    return (
-        QUANT_LAB
-        / "data"
-        / "analysis"
-        / "dukascopy_horizon_expansion"
-        / f"symbol={symbol}"
-    )
-
-
-def banner(title: str) -> None:
-    print("=" * 90)
-    print(title)
-    print("=" * 90)
-
-
-def ensure_dirs(output_root: Path, report_root: Path) -> None:
-    output_root.mkdir(parents=True, exist_ok=True)
-    report_root.mkdir(parents=True, exist_ok=True)
+    return QUANT_LAB / "data" / "analysis" / "dukascopy_horizon_expansion" / f"symbol={symbol.upper().strip()}"
 
 
 def discover_files(input_root: Path) -> list[Path]:
@@ -74,190 +41,169 @@ def discover_files(input_root: Path) -> list[Path]:
 
 
 def get_output_path(input_path: Path, output_root: Path) -> Path:
-    year = None
-    month = None
-
-    for part in input_path.parts:
-        if part.startswith("year="):
-            year = part
-        elif part.startswith("month="):
-            month = part
-
-    output_name = input_path.name.replace(
-        "_engineered_features.parquet",
-        "_horizon_features.parquet",
-    )
-
-    if year and month:
-        output_dir = output_root / year / month
-        output_dir.mkdir(parents=True, exist_ok=True)
-        return output_dir / output_name
-
-    output_root.mkdir(parents=True, exist_ok=True)
-    return output_root / output_name
+    year = next((part for part in input_path.parts if part.startswith("year=")), None)
+    month = next((part for part in input_path.parts if part.startswith("month=")), None)
+    name = input_path.name.replace("_engineered_features.parquet", "_horizon_features.parquet")
+    return (output_root / year / month / name) if year and month else output_root / name
 
 
-def add_forward_horizons(df: pd.DataFrame, horizons: list[int] | None = None) -> pd.DataFrame:
-    df = df.copy()
-    horizons = horizons or HORIZONS
+def _timestamps(frame: pd.DataFrame, label: str) -> pd.Series:
+    if "timestamp_utc" not in frame:
+        raise ValueError(f"{label} lacks timestamp_utc")
+    values = pd.to_datetime(frame["timestamp_utc"], utc=True, errors="coerce")
+    if values.isna().any() or not values.is_monotonic_increasing:
+        raise ValueError(f"{label} has invalid/non-monotonic chronology")
+    if values.duplicated().any():
+        raise ValueError(f"{label} contains duplicate timestamps")
+    return values
 
-    for h in horizons:
-        df[f"future_return_{h}"] = df["mid"].shift(-h) / df["mid"] - 1
 
-    return df
+def add_forward_horizons(
+    df: pd.DataFrame,
+    horizons: list[int] | tuple[int, ...] | None = None,
+) -> pd.DataFrame:
+    horizons = list(horizons or HORIZONS)
+    output = df.copy()
+    for horizon in horizons:
+        target = f"future_return_{int(horizon)}"
+        require_target(target, approved_extra_targets=[target])
+        output[target] = (
+            output[APPROVED_TARGET_PRICE_BASIS].shift(-int(horizon))
+            / output[APPROVED_TARGET_PRICE_BASIS]
+            - 1.0
+        )
+    return output
 
 
-def process_file(path: Path, output_root: Path, horizons: list[int] | None = None) -> dict:
-    horizons = horizons or HORIZONS
-    df = pd.read_parquet(path)
+def build_partition_targets(
+    current: pd.DataFrame,
+    *,
+    future: pd.DataFrame | None = None,
+    horizons: list[int] | tuple[int, ...] | None = None,
+) -> pd.DataFrame:
+    horizons = list(horizons or HORIZONS)
+    if APPROVED_TARGET_PRICE_BASIS not in current:
+        raise ValueError(f"Current partition lacks approved price basis {APPROVED_TARGET_PRICE_BASIS!r}")
+    current = current.copy().reset_index(drop=True)
+    current["timestamp_utc"] = _timestamps(current, "current partition")
+    future_frame = pd.DataFrame(columns=current.columns)
+    if future is not None and not future.empty:
+        future_frame = future.copy().reset_index(drop=True)
+        future_frame["timestamp_utc"] = _timestamps(future_frame, "future target support")
+        future_frame = future_frame.head(max(horizons)).reset_index(drop=True)
+    combined = pd.concat([current, future_frame], ignore_index=True)
+    _timestamps(combined, "continuous target stream")
+    combined = add_forward_horizons(combined, horizons)
+    output = combined.iloc[: len(current)].copy().reset_index(drop=True)
+    if not output["timestamp_utc"].equals(current["timestamp_utc"]):
+        raise AssertionError("Script 30 changed current-partition row ownership")
+    return output.replace([np.inf, -np.inf], np.nan)
 
-    if len(df) < MIN_ROWS:
-        return {
-            "input_file": str(path),
-            "output_file": None,
-            "status": "skipped_too_few_rows",
-            "rows_in": len(df),
-            "rows_out": 0,
-            "horizons_added": 0,
-        }
 
-    required = {"timestamp_utc", "mid"}
-    missing = required - set(df.columns)
+def _ordered_files(files: list[Path]) -> list[Path]:
+    bounds: list[tuple[pd.Timestamp, pd.Timestamp, Path]] = []
+    for path in files:
+        values = _timestamps(pd.read_parquet(path, columns=["timestamp_utc"]), str(path))
+        if values.empty:
+            raise ValueError(f"Empty engineered partition: {path}")
+        bounds.append((values.iloc[0], values.iloc[-1], path))
+    bounds.sort(key=lambda row: (row[0], str(row[2])))
+    for previous, current in zip(bounds, bounds[1:]):
+        if current[0] <= previous[1]:
+            raise ValueError(f"Engineered partition overlap/reversal: {previous[2]} -> {current[2]}")
+    return [row[2] for row in bounds]
 
-    if missing:
-        return {
-            "input_file": str(path),
-            "output_file": None,
-            "status": f"missing_columns_{sorted(missing)}",
-            "rows_in": len(df),
-            "rows_out": 0,
-            "horizons_added": 0,
-        }
 
-    df = df.sort_values("timestamp_utc").reset_index(drop=True)
-    df = add_forward_horizons(df, horizons=horizons)
-    df = df.replace([np.inf, -np.inf], np.nan)
-
-    output_path = get_output_path(path, output_root)
-    df.to_parquet(output_path, index=False)
-
-    return {
-        "input_file": str(path),
-        "output_file": str(output_path),
-        "status": "ok",
-        "rows_in": len(df),
-        "rows_out": len(df),
-        "horizons_added": len(horizons),
-    }
+def _future_rows(files: list[Path], index: int, required: int) -> tuple[pd.DataFrame, list[str]]:
+    frames: list[pd.DataFrame] = []
+    sources: list[str] = []
+    available = 0
+    for path in files[index + 1 :]:
+        if available >= required:
+            break
+        frame = pd.read_parquet(path)
+        take = min(required - available, len(frame))
+        frames.append(frame.head(take))
+        sources.append(str(path))
+        available += take
+    return (pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()), sources
 
 
 def run_horizon_expansion(
     symbol: str = DEFAULT_SYMBOL,
     horizons: list[int] | None = None,
+    *,
+    allow_production_write: bool = False,
 ) -> tuple[Path, Path]:
     symbol = symbol.upper().strip()
-    horizons = horizons or HORIZONS
-
+    horizons = sorted(set(int(value) for value in (horizons or HORIZONS)))
     input_root = get_input_root(symbol)
     output_root = get_output_root(symbol)
     report_root = get_report_root(symbol)
-
-    banner("BACQE DUKASCOPY 30 - HORIZON EXPANSION ENGINE")
-    ensure_dirs(output_root, report_root)
-
-    print(f"Symbol:      {symbol}")
-    print(f"Input root:  {input_root}")
-    print(f"Output root: {output_root}")
-    print(f"Report root: {report_root}")
-    print(f"Horizons:    {horizons}")
-    print("-" * 90)
-
-    files = discover_files(input_root)
-
-    print(f"Input files discovered: {len(files)}")
-    print("-" * 90)
-
-    if not files:
-        print("[STOP] No input files found.")
-        return report_root / f"{symbol}_horizon_expansion_latest.csv", report_root / f"{symbol}_horizon_expansion_report_latest.txt"
-
-    results = []
-
-    for i, path in enumerate(files, start=1):
-        print(f"[{i}/{len(files)}] {path}")
-
-        try:
-            result = process_file(path, output_root=output_root, horizons=horizons)
-            results.append(result)
-
-            print(
-                f"    status={result['status']} "
-                f"rows={result['rows_in']:,} "
-                f"horizons={result['horizons_added']}"
-            )
-
-        except Exception as e:
-            results.append({
-                "input_file": str(path),
-                "output_file": None,
-                "status": "error",
-                "error": str(e),
-                "rows_in": None,
-                "rows_out": None,
-                "horizons_added": None,
-            })
-
-            print(f"    [ERROR] {e}")
-
-    results_df = pd.DataFrame(results)
-
-    report_csv = report_root / f"{symbol}_horizon_expansion_latest.csv"
-    report_txt = report_root / f"{symbol}_horizon_expansion_report_latest.txt"
-
-    results_df.to_csv(report_csv, index=False)
-
-    ok_count = (results_df["status"] == "ok").sum()
-    skipped_count = results_df["status"].str.startswith("skipped").sum()
-    error_count = (results_df["status"] == "error").sum()
-
-    with open(report_txt, "w", encoding="utf-8") as f:
-        f.write("BACQE DUKASCOPY HORIZON EXPANSION REPORT\n")
-        f.write("=" * 80 + "\n\n")
-        f.write(f"Symbol: {symbol}\n")
-        f.write(f"Input files: {len(files)}\n")
-        f.write(f"Files OK: {ok_count}\n")
-        f.write(f"Files skipped: {skipped_count}\n")
-        f.write(f"Files errored: {error_count}\n")
-        f.write(f"Horizons added: {horizons}\n\n")
-        f.write(f"Input root: {input_root}\n")
-        f.write(f"Output root: {output_root}\n")
-        f.write(f"CSV report: {report_csv}\n")
-
-    print("=" * 90)
-    print("[DONE] Horizon expansion complete.")
-    print(f"Files OK:      {ok_count}")
-    print(f"Files skipped: {skipped_count}")
-    print(f"Files errored: {error_count}")
-    print(f"CSV report:    {report_csv}")
-    print(f"TXT report:    {report_txt}")
-    print(f"Output root:   {output_root}")
-    print("=" * 90)
-
-    return report_csv, report_txt
+    files = _ordered_files(discover_files(input_root))
+    if files and not allow_production_write:
+        raise PermissionError(
+            "D2 horizon regeneration is not authorised. Re-run with "
+            "--allow-production-write only during an explicitly approved regeneration."
+        )
+    output_root.mkdir(parents=True, exist_ok=True)
+    report_root.mkdir(parents=True, exist_ok=True)
+    rows: list[dict] = []
+    for index, path in enumerate(files):
+        certification = validate_feature_parquet(path)
+        if not certification["certified"]:
+            raise ValueError(f"Uncertified D2 feature input {path}: {certification['reason']}")
+        current = pd.read_parquet(path)
+        future, sources = _future_rows(files, index, max(horizons))
+        output = build_partition_targets(current, future=future, horizons=horizons)
+        output_path = get_output_path(path, output_root)
+        write_feature_parquet(
+            output,
+            output_path,
+            {
+                **certification["metadata"],
+                "source_partition": str(path),
+                "output_row_owner": str(path),
+                "target_semantics": "event_time_tick_count",
+                "target_contract_version": TARGET_CONTRACT_VERSION,
+                "target_horizons": json.dumps(horizons),
+                "future_support_partitions": json.dumps(sources),
+            },
+        )
+        rows.append({"status": "ok", "input_file": str(path), "output_file": str(output_path), "rows_in": len(current), "rows_out": len(output), "future_support_rows": len(future)})
+    report_csv = report_root / f"{symbol}_horizon_expansion_d2_latest.csv"
+    report_json = report_root / f"{symbol}_horizon_expansion_d2_manifest_latest.json"
+    pd.DataFrame(rows).to_csv(report_csv, index=False)
+    report_json.write_text(
+        json.dumps(
+            {
+                "status": "PASS",
+                "symbol": symbol,
+                "target_contract_version": TARGET_CONTRACT_VERSION,
+                "target_semantics": "event_time_tick_count",
+                "target_price_basis": APPROVED_TARGET_PRICE_BASIS,
+                "horizons": horizons,
+                "partition_count": len(files),
+                "production_regeneration_authorised": allow_production_write,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return report_csv, report_json
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Add forward-return horizons to Dukascopy engineered feature files."
-    )
+    parser = argparse.ArgumentParser(description="Build continuous event-time Dukascopy targets")
     parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    parser.add_argument("--allow-production-write", action="store_true")
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    run_horizon_expansion(symbol=args.symbol)
-
-
 if __name__ == "__main__":
-    main()
+    arguments = parse_args()
+    run_horizon_expansion(
+        arguments.symbol,
+        allow_production_write=arguments.allow_production_write,
+    )

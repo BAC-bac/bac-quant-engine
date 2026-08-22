@@ -12,8 +12,18 @@ Pilot:
 
 from pathlib import Path
 import argparse
+import sys
 import numpy as np
 import pandas as pd
+
+DUKASCOPY_TICKS_DIR = Path(__file__).resolve().parents[1] / "dukascopy_ticks"
+if str(DUKASCOPY_TICKS_DIR) not in sys.path:
+    sys.path.insert(0, str(DUKASCOPY_TICKS_DIR))
+
+from dukascopy_feature_contract import (  # noqa: E402
+    predictor_columns,
+    require_target,
+)
 
 
 DEFAULT_SYMBOL = "EURJPY"
@@ -75,24 +85,13 @@ def find_files(symbol: str) -> list[Path]:
 
 
 def get_numeric_feature_columns(df: pd.DataFrame, targets: list[str]) -> list[str]:
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
-    features = []
-    for col in numeric_cols:
-        col_lower = col.lower()
-
-        if col in targets:
-            continue
-
-        if col_lower in EXCLUDE_COLUMNS:
-            continue
-
-        if col_lower.startswith("future_return_"):
-            continue
-
-        features.append(col)
-
-    return features
+    for target in targets:
+        require_target(target, approved_extra_targets=targets)
+    return predictor_columns(
+        df,
+        fail_on_unknown_numeric=True,
+        approved_extra_targets=targets,
+    )
 
 
 def safe_corr(x: pd.Series, y: pd.Series) -> float:

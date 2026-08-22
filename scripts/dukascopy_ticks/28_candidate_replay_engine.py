@@ -17,6 +17,8 @@ import argparse
 import numpy as np
 import pandas as pd
 
+from dukascopy_feature_contract import require_predictor, require_target
+
 
 DEFAULT_SYMBOL = "EURUSD"
 QUANT_LAB = Path(r"E:\Quant_Lab")
@@ -141,7 +143,9 @@ def load_candidates(candidate_path: Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing candidate columns: {sorted(missing)}")
 
-    df = df[df["feature"] != "mid"].copy()
+    for row in df.itertuples(index=False):
+        require_predictor(str(row.feature))
+        require_target(str(row.target), approved_extra_targets=[str(row.target)])
     return df.head(TOP_N_CANDIDATES)
 
 

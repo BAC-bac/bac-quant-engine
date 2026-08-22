@@ -17,6 +17,14 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from dukascopy_feature_contract import (
+    APPROVED_TARGET_PRICE_BASIS,
+    FeatureContractError,
+    column_spec,
+    predictor_columns,
+    require_target,
+)
+
 warnings.filterwarnings("ignore")
 
 try:
@@ -142,21 +150,21 @@ def find_timestamp_col(df: pd.DataFrame) -> str | None:
 
 
 def find_price_col(df: pd.DataFrame) -> str | None:
-    candidates = ["mid", "close", "mid_price", "price", "bid"]
-
-    for col in candidates:
-        if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
-            return col
-
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    return numeric_cols[0] if numeric_cols else None
+    if (
+        APPROVED_TARGET_PRICE_BASIS in df.columns
+        and pd.api.types.is_numeric_dtype(df[APPROVED_TARGET_PRICE_BASIS])
+    ):
+        return APPROVED_TARGET_PRICE_BASIS
+    return None
 
 
 def create_forward_returns(df: pd.DataFrame, price_col: str) -> pd.DataFrame:
     df = df.copy()
 
     for window in FORWARD_WINDOWS:
-        df[f"future_return_{window}"] = (
+        target = f"future_return_{window}"
+        require_target(target, approved_extra_targets=[target])
+        df[target] = (
             df[price_col].shift(-window) / df[price_col] - 1
         )
 
@@ -167,6 +175,13 @@ def build_feature_inventory(df: pd.DataFrame, dataset_name: str, symbol: str) ->
     rows = []
 
     for col in df.columns:
+        try:
+            role = column_spec(
+                col,
+                approved_extra_targets=[f"future_return_{window}" for window in FORWARD_WINDOWS],
+            ).role
+        except FeatureContractError:
+            role = "unregistered"
         rows.append({
             "symbol": symbol,
             "dataset": dataset_name,
@@ -176,32 +191,19 @@ def build_feature_inventory(df: pd.DataFrame, dataset_name: str, symbol: str) ->
             "missing_pct": round(df[col].isna().mean() * 100, 4),
             "unique_values": df[col].nunique(dropna=True),
             "is_numeric": pd.api.types.is_numeric_dtype(df[col]),
+            "feature_role": role,
         })
 
     return pd.DataFrame(rows)
 
 
 def get_feature_columns(df: pd.DataFrame) -> list[str]:
-    future_cols = [c for c in df.columns if c.startswith("future_return_")]
-
-    feature_cols = []
-
-    for col in df.columns:
-        if col in EXCLUDE_COLS:
-            continue
-
-        if col in future_cols:
-            continue
-
-        if not pd.api.types.is_numeric_dtype(df[col]):
-            continue
-
-        if df[col].nunique(dropna=True) < 5:
-            continue
-
-        feature_cols.append(col)
-
-    return feature_cols
+    registered = predictor_columns(
+        df,
+        fail_on_unknown_numeric=True,
+        approved_extra_targets=[f"future_return_{window}" for window in FORWARD_WINDOWS],
+    )
+    return [col for col in registered if df[col].nunique(dropna=True) >= 5]
 
 
 def calculate_spearman(x: pd.Series, y: pd.Series) -> tuple[float, float]:
@@ -242,7 +244,13 @@ def calculate_mutual_info(x: pd.Series, y: pd.Series) -> float:
 
 def score_features(df: pd.DataFrame, dataset_name: str, symbol: str) -> pd.DataFrame:
     feature_cols = get_feature_columns(df)
-    target_cols = [c for c in df.columns if c.startswith("future_return_")]
+    target_cols = [
+        f"future_return_{window}"
+        for window in FORWARD_WINDOWS
+        if f"future_return_{window}" in df.columns
+    ]
+    for target in target_cols:
+        require_target(target, approved_extra_targets=target_cols)
 
     rows = []
 

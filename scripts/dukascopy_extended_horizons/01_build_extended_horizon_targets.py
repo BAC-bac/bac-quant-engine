@@ -17,10 +17,26 @@ Return unit:
 
 import argparse
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+DUKASCOPY_TICKS_DIR = Path(__file__).resolve().parents[1] / "dukascopy_ticks"
+if str(DUKASCOPY_TICKS_DIR) not in sys.path:
+    sys.path.insert(0, str(DUKASCOPY_TICKS_DIR))
+
+from dukascopy_feature_contract import (  # noqa: E402
+    APPROVED_TARGET_PRICE_BASIS,
+    CAUSAL_LOOKBACK_SPEC_VERSION,
+    FEATURE_ROLE_CONTRACT_VERSION,
+    FEATURE_SCHEMA_VERSION,
+    TARGET_CONTRACT_VERSION,
+    feature_contract_fingerprint,
+    predictor_columns,
+    require_target,
+)
 
 from extended_horizons_foundation import (
     EngineMetadata,
@@ -67,7 +83,7 @@ REPORT_ROOT = (
     / "target_build"
 )
 
-PRICE_COLUMN_CANDIDATES = ["close", "mid", "mid_price", "price", "last"]
+TARGET_PRICE_COLUMN = APPROVED_TARGET_PRICE_BASIS
 TIMESTAMP_COLUMN_CANDIDATES = [
     "timestamp",
     "datetime",
@@ -475,6 +491,7 @@ def main(
     input_root: Path,
     output_root: Path,
     report_root: Path,
+    price_column: str = TARGET_PRICE_COLUMN,
 ) -> int:
     symbol = symbol.upper().strip()
     horizons = normalise_positive_ints(
@@ -501,15 +518,22 @@ def main(
 
     files = find_parquet_files(symbol, input_root)
 
+    if price_column != TARGET_PRICE_COLUMN:
+        raise ValueError(
+            f"EH01 target price basis must be {TARGET_PRICE_COLUMN!r} under the D2 contract; "
+            f"got {price_column!r}."
+        )
+
     first_frame = pd.read_parquet(files[0])
     if first_frame.empty:
         raise ValueError(f"First input file is empty: {files[0]}")
 
-    price_column = detect_column(
-        list(first_frame.columns),
-        PRICE_COLUMN_CANDIDATES,
-        label="price",
+    require_columns(
+        first_frame,
+        [price_column],
+        frame_name=str(files[0]),
     )
+    predictor_columns(first_frame, fail_on_unknown_numeric=True)
     timestamp_column = detect_timestamp_column(
         list(first_frame.columns)
     )
@@ -558,6 +582,12 @@ def main(
                 file_index=file_index,
                 bounds=bounds,
             )
+            for horizon in horizons:
+                target_name = f"future_return_{horizon}"
+                require_target(
+                    target_name,
+                    approved_extra_targets=[target_name],
+                )
 
             output_path = output_path_for(
                 symbol=symbol,
@@ -655,6 +685,11 @@ def main(
             "return_type": RETURN_TYPE,
             "return_unit": RETURN_UNIT,
             "target_price_basis": price_column,
+            "d2_feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "feature_role_contract_version": FEATURE_ROLE_CONTRACT_VERSION,
+            "causal_lookback_spec_version": CAUSAL_LOOKBACK_SPEC_VERSION,
+            "target_contract_version": TARGET_CONTRACT_VERSION,
+            "feature_contract_fingerprint": feature_contract_fingerprint(),
             "timestamp_column": timestamp_column or "",
             "input_root": str(input_root),
             "output_root": str(output_root),
@@ -719,6 +754,12 @@ def parse_args() -> argparse.Namespace:
         default=REPORT_ROOT,
     )
     parser.add_argument(
+        "--price-column",
+        default=TARGET_PRICE_COLUMN,
+        choices=[TARGET_PRICE_COLUMN],
+        help="Explicit D2-approved target price basis.",
+    )
+    parser.add_argument(
         "--self-test",
         action="store_true",
     )
@@ -739,5 +780,6 @@ if __name__ == "__main__":
             input_root=arguments.input_root,
             output_root=arguments.output_root,
             report_root=arguments.report_root,
+            price_column=arguments.price_column,
         )
     )
