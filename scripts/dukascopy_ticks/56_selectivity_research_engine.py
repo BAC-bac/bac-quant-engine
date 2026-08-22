@@ -2,6 +2,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from dukascopy_contract import get_symbol_metadata
+
 
 QUANT_LAB = Path(r"E:\Quant_Lab")
 
@@ -75,9 +77,6 @@ QUANTILE_LEVELS = [
     0.99,
 ]
 
-POINT_SIZE = 0.00001
-
-
 def ensure_dirs() -> None:
     for folder in [
         OUTPUT_ROOT,
@@ -142,7 +141,8 @@ def add_period_rates(df: pd.DataFrame, return_col: str) -> dict:
     return result
 
 
-def prepare_candidate_ledger(df: pd.DataFrame) -> pd.DataFrame:
+def prepare_candidate_ledger(df: pd.DataFrame, symbol: str = SYMBOL) -> pd.DataFrame:
+    metadata = get_symbol_metadata(symbol)
     df = df.copy()
 
     df = df[
@@ -180,7 +180,7 @@ def prepare_candidate_ledger(df: pd.DataFrame) -> pd.DataFrame:
         if "avg_spread" in df.columns:
             df["spread"] = df["avg_spread"]
         elif "spread_points" in df.columns:
-            df["spread"] = df["spread_points"] * POINT_SIZE
+            df["spread"] = df["spread_points"] * metadata.point_size
         else:
             raise ValueError("Could not find spread, avg_spread, or spread_points column.")
 
@@ -191,6 +191,14 @@ def prepare_candidate_ledger(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def run_selectivity_tests(df: pd.DataFrame) -> pd.DataFrame:
+    raise RuntimeError(
+        "Script 56 return-space cost conversion is intentionally blocked: spread is a "
+        "quote-price distance and cannot be subtracted from dimensionless returns until "
+        "the separate BACQE execution/cost contract is approved."
+    )
+
+    # Legacy cost scenarios remain below for forensic reference and are
+    # unreachable under the D1 fail-closed contract.
     rows = []
 
     feature_abs = df["signal_strength"].abs()
@@ -301,7 +309,7 @@ def main() -> None:
     ledger = pd.read_parquet(LEDGER_PATH)
     print(f"Loaded ledger rows: {len(ledger):,}")
 
-    candidate = prepare_candidate_ledger(ledger)
+    candidate = prepare_candidate_ledger(ledger, symbol=SYMBOL)
     print(f"Candidate rows: {len(candidate):,}")
 
     if candidate.empty:

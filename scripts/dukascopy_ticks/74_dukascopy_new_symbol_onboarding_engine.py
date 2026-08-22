@@ -41,6 +41,8 @@ from __future__ import annotations
 from pathlib import Path
 import argparse
 import yaml
+
+from dukascopy_contract import get_symbol_metadata
 import pandas as pd
 
 
@@ -269,13 +271,7 @@ def configured_symbols(config: dict) -> list[str]:
     if not symbols:
         raise ValueError("No configured Dukascopy symbols found.")
 
-    return sorted(
-        {
-            str(symbol).upper().strip()
-            for symbol in symbols
-            if str(symbol).strip()
-        }
-    )
+    return sorted({get_symbol_metadata(symbol).symbol for symbol in symbols if str(symbol).strip()})
 
 
 def normalise_symbol_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -327,7 +323,7 @@ def ingestion_stage_complete(
 ) -> bool:
     accepted = {
         "RAW": {"complete_or_near_complete"},
-        "08": {"partial", "complete_or_near_complete"},
+        "08": {"certified_complete"},
         "09": {"present"},
         "10": {"present"},
         "23": {"partial", "complete_or_near_complete"},

@@ -25,6 +25,8 @@ import sys
 import time
 import yaml
 
+from dukascopy_contract import get_symbol_metadata
+
 
 CONFIG_PATH = Path("config/dukascopy_research.yaml")
 
@@ -173,8 +175,11 @@ def main(
     if not cfg.get("enabled", True):
         raise RuntimeError("dukascopy_research.enabled is false in config.")
 
-    yaml_symbols = [symbol.upper() for symbol in cfg["symbols"]]
-    selected_symbols = [symbol.upper() for symbol in symbols] if symbols else yaml_symbols
+    yaml_symbols = [get_symbol_metadata(symbol).symbol for symbol in cfg["symbols"]]
+    selected_symbols = (
+        [get_symbol_metadata(symbol).symbol for symbol in symbols]
+        if symbols else yaml_symbols
+    )
 
     start_date = cfg["date_range"]["start"]
     end_date = cfg["date_range"]["end"]

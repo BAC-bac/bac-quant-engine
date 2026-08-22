@@ -11,6 +11,8 @@ from datetime import datetime
 import pandas as pd
 import yaml
 
+from dukascopy_contract import get_symbol_metadata, inventory_normalised_symbol
+
 
 CONFIG_PATH = Path("config/dukascopy_research.yaml")
 
@@ -96,7 +98,7 @@ def collect_dates_from_files(root: Path, symbol: str, suffix_hint: str) -> set[s
 
 
 def build_inventory(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
-    symbols = cfg["symbols"]
+    symbols = [get_symbol_metadata(symbol).symbol for symbol in cfg["symbols"]]
     start = cfg["date_range"]["start"]
     end = cfg["date_range"]["end"]
 
@@ -116,11 +118,9 @@ def build_inventory(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     for symbol in symbols:
         print(f"[SYMBOL] {symbol}")
 
-        processed_dates = collect_dates_from_files(
-            processed_ticks_root,
-            symbol,
-            "_ticks.parquet",
-        )
+        processed_contract = inventory_normalised_symbol(processed_ticks_root, symbol)
+        processed_dates = processed_contract["all_dates"]
+        certified_processed_dates = processed_contract["certified_dates"]
 
         engineered_dates = collect_dates_from_files(
             engineered_root,
@@ -144,6 +144,7 @@ def build_inventory(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
         for date_str in all_dates:
             has_raw = date_str in raw_dates
             has_processed = date_str in processed_dates
+            has_certified_processed = date_str in certified_processed_dates
             has_engineered = date_str in engineered_dates
             has_horizon = date_str in horizon_dates
 
@@ -152,6 +153,7 @@ def build_inventory(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 "date": date_str,
                 "has_raw": has_raw,
                 "has_processed_ticks": has_processed,
+                "has_certified_processed_ticks": has_certified_processed,
                 "has_engineered_features": has_engineered,
                 "has_horizon_features": has_horizon,
             })
@@ -161,6 +163,13 @@ def build_inventory(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                     "symbol": symbol,
                     "date": date_str,
                     "missing_stage": "processed_ticks",
+                })
+
+            if has_processed and not has_certified_processed:
+                missing_rows.append({
+                    "symbol": symbol,
+                    "date": date_str,
+                    "missing_stage": "processed_ticks_uncertified",
                 })
 
             if has_processed and not has_engineered:
@@ -187,6 +196,7 @@ def summarise_inventory(inventory: pd.DataFrame) -> pd.DataFrame:
             calendar_days=("date", "count"),
             raw_days=("has_raw", "sum"),
             processed_tick_days=("has_processed_ticks", "sum"),
+            certified_processed_tick_days=("has_certified_processed_ticks", "sum"),
             engineered_feature_days=("has_engineered_features", "sum"),
             horizon_feature_days=("has_horizon_features", "sum"),
         )
@@ -194,6 +204,10 @@ def summarise_inventory(inventory: pd.DataFrame) -> pd.DataFrame:
 
     summary["missing_processed_tick_days"] = (
         summary["calendar_days"] - summary["processed_tick_days"]
+    )
+
+    summary["uncertified_processed_tick_days"] = (
+        summary["processed_tick_days"] - summary["certified_processed_tick_days"]
     )
 
     summary["missing_engineered_feature_days"] = (

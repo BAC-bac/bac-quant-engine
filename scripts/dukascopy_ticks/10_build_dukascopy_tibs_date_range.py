@@ -15,6 +15,8 @@ import argparse
 import numpy as np
 import pandas as pd
 
+from dukascopy_contract import get_symbol_metadata
+
 
 DATA_ROOT = Path(r"E:\Quant_Lab\data")
 
@@ -27,9 +29,6 @@ DEFAULT_START_DATE = "2023-01-01"
 DEFAULT_END_DATE = "2025-12-31"
 
 IMBALANCE_THRESHOLDS = [25, 50, 100]
-
-POINT_SIZE = 0.00001
-
 
 def date_range(start: datetime, end: datetime):
     current = start
@@ -88,8 +87,18 @@ def add_tick_rule_signs(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def build_tick_imbalance_bars(df: pd.DataFrame, threshold: int) -> pd.DataFrame:
+def build_tick_imbalance_bars(
+    df: pd.DataFrame,
+    threshold: int,
+    point_size: float | None = None,
+) -> pd.DataFrame:
     df = add_tick_rule_signs(df)
+
+    if point_size is None:
+        symbols = df["symbol"].dropna().astype(str).str.upper().unique().tolist()
+        if len(symbols) != 1:
+            raise ValueError(f"Expected exactly one symbol in tick frame, found {symbols}")
+        point_size = get_symbol_metadata(symbols[0]).point_size
 
     bars = []
     current_rows = []
@@ -161,7 +170,7 @@ def build_tick_imbalance_bars(df: pd.DataFrame, threshold: int) -> pd.DataFrame:
 
     bars_df["return_close_to_close"] = bars_df["close"].pct_change()
     bars_df["range"] = bars_df["high"] - bars_df["low"]
-    bars_df["range_points"] = bars_df["range"] / POINT_SIZE
+    bars_df["range_points"] = bars_df["range"] / point_size
 
     ordered_cols = [
         "bar_id",
@@ -268,6 +277,7 @@ def run_tib_builder(
     end_date: str = DEFAULT_END_DATE,
 ) -> None:
     symbol = symbol.upper().strip()
+    metadata = get_symbol_metadata(symbol)
 
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
@@ -314,7 +324,7 @@ def run_tib_builder(
         print(f"  Loaded ticks: {len(df):,}")
 
         for threshold in IMBALANCE_THRESHOLDS:
-            bars = build_tick_imbalance_bars(df, threshold)
+            bars = build_tick_imbalance_bars(df, threshold, point_size=metadata.point_size)
 
             out_path = output_tib_path(symbol, dt, threshold)
             out_path.parent.mkdir(parents=True, exist_ok=True)

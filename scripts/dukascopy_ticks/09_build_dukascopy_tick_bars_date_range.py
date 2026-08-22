@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 import argparse
 import pandas as pd
 
+from dukascopy_contract import get_symbol_metadata
+
 
 # =============================================================================
 # CONFIG
@@ -36,9 +38,6 @@ DEFAULT_START_DATE = "2023-01-01"
 DEFAULT_END_DATE = "2025-12-31"
 
 TICK_SIZES = [100, 250, 500, 1000]
-
-POINT_SIZE = 0.00001
-
 
 # =============================================================================
 # DATE HELPERS
@@ -87,8 +86,18 @@ def report_path(symbol: str, start: datetime, end: datetime) -> Path:
 # BAR BUILDER
 # =============================================================================
 
-def build_tick_bars(df: pd.DataFrame, tick_size: int) -> pd.DataFrame:
+def build_tick_bars(
+    df: pd.DataFrame,
+    tick_size: int,
+    point_size: float | None = None,
+) -> pd.DataFrame:
     df = df.sort_values("timestamp_utc").reset_index(drop=True).copy()
+
+    if point_size is None:
+        symbols = df["symbol"].dropna().astype(str).str.upper().unique().tolist()
+        if len(symbols) != 1:
+            raise ValueError(f"Expected exactly one symbol in tick frame, found {symbols}")
+        point_size = get_symbol_metadata(symbols[0]).point_size
 
     df["bar_id"] = df.index // tick_size
 
@@ -135,7 +144,7 @@ def build_tick_bars(df: pd.DataFrame, tick_size: int) -> pd.DataFrame:
 
     bars["return_close_to_close"] = bars["close"].pct_change()
     bars["range"] = bars["high"] - bars["low"]
-    bars["range_points"] = bars["range"] / POINT_SIZE
+    bars["range_points"] = bars["range"] / point_size
 
     ordered_cols = [
         "timestamp_start",
@@ -236,6 +245,7 @@ def run_tick_bar_builder(
     end_date: str = DEFAULT_END_DATE,
 ) -> None:
     symbol = symbol.upper().strip()
+    metadata = get_symbol_metadata(symbol)
 
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
@@ -284,7 +294,7 @@ def run_tick_bar_builder(
         print(f"  Loaded ticks: {len(df):,}")
 
         for tick_size in TICK_SIZES:
-            bars = build_tick_bars(df, tick_size)
+            bars = build_tick_bars(df, tick_size, point_size=metadata.point_size)
 
             out_path = output_bar_path(symbol, dt, tick_size)
             out_path.parent.mkdir(parents=True, exist_ok=True)

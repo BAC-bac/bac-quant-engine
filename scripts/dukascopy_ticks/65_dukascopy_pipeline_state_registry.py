@@ -20,6 +20,13 @@ from pathlib import Path
 import yaml
 import pandas as pd
 
+from dukascopy_contract import (
+    NORMALISATION_SCHEMA_VERSION,
+    SYMBOL_METADATA_SCHEMA_VERSION,
+    get_symbol_metadata,
+    inventory_normalised_symbol,
+)
+
 
 CONFIG_PATH = Path("config/dukascopy_research.yaml")
 
@@ -78,10 +85,25 @@ def stage_status(days: int, expected: int) -> str:
     return "low_coverage"
 
 
+def certified_processed_status(
+    total_days: int,
+    certified_days: int,
+    expected_source_days: int,
+    uncertified_files: int,
+) -> str:
+    if total_days == 0:
+        return "missing"
+    if uncertified_files or certified_days != total_days:
+        return "legacy_or_uncertified_contract"
+    if expected_source_days and certified_days >= expected_source_days:
+        return "certified_complete"
+    return "certified_incomplete"
+
+
 def build_registry() -> pd.DataFrame:
     cfg = load_config()
 
-    symbols = [symbol.upper() for symbol in cfg["symbols"]]
+    symbols = [get_symbol_metadata(symbol).symbol for symbol in cfg["symbols"]]
     start = cfg["date_range"]["start"]
     end = cfg["date_range"]["end"]
 
@@ -110,10 +132,17 @@ def build_registry() -> pd.DataFrame:
         if raw_days == 0:
             raw_days = count_daily_symbol_files(raw_symbol_root, symbol, "*.parquet")
 
-        processed_tick_days = count_daily_symbol_files(
-            processed_symbol_root,
-            symbol,
-            "*.parquet",
+        processed_inventory = inventory_normalised_symbol(
+            processed_root / "dukascopy_ticks", symbol
+        )
+        processed_tick_days = len(processed_inventory["all_dates"])
+        certified_processed_tick_days = len(processed_inventory["certified_dates"])
+        raw_source_days = count_daily_symbol_files(raw_symbol_root, symbol, "*.bi5")
+        processed_contract_status = certified_processed_status(
+            total_days=processed_tick_days,
+            certified_days=certified_processed_tick_days,
+            expected_source_days=raw_source_days,
+            uncertified_files=processed_inventory["uncertified_files"],
         )
 
         engineered_days = count_daily_symbol_files(
@@ -144,7 +173,14 @@ def build_registry() -> pd.DataFrame:
 
                 "processed_tick_days": processed_tick_days,
                 "processed_tick_coverage_pct": pct(processed_tick_days, expected_calendar_days),
-                "processed_tick_status": stage_status(processed_tick_days, expected_calendar_days),
+                "certified_processed_tick_days": certified_processed_tick_days,
+                "certified_processed_tick_coverage_pct": pct(
+                    certified_processed_tick_days, raw_source_days
+                ),
+                "processed_tick_uncertified_files": processed_inventory["uncertified_files"],
+                "processed_tick_status": processed_contract_status,
+                "normalisation_schema_version_required": NORMALISATION_SCHEMA_VERSION,
+                "symbol_metadata_version_required": SYMBOL_METADATA_SCHEMA_VERSION,
 
                 "tick_bar_files": tick_bar_files,
                 "tick_bar_status": "present" if tick_bar_files > 0 else "missing",

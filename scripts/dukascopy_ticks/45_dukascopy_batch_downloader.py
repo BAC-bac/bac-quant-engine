@@ -5,7 +5,10 @@ BACQE DUKASCOPY 45 - BATCH DOWNLOADER + NORMALISER
 from pathlib import Path
 import importlib.util
 import pandas as pd
+import sys
 import yaml
+
+from dukascopy_contract import get_symbol_metadata
 
 
 CONFIG_PATH = Path("config/dukascopy_research.yaml")
@@ -29,6 +32,7 @@ def load_config() -> dict:
 def import_script_function(script_path: Path, function_name: str):
     spec = importlib.util.spec_from_file_location(script_path.stem, script_path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
 
     if not hasattr(module, function_name):
@@ -94,7 +98,7 @@ def main() -> None:
     rows = []
 
     for i, row in enumerate(plan.itertuples(index=False), start=1):
-        symbol = row.symbol
+        symbol = get_symbol_metadata(row.symbol).symbol
         date = row.date
 
         print("=" * 90)

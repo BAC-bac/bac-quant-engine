@@ -14,8 +14,7 @@ dukascopy_pipeline:
     - stage_key: processed_ticks
       status_column: processed_tick_status
       complete_values:
-        - complete_or_near_complete
-        - partial
+        - certified_complete
       next_script_stage: "08"
       priority: critical
 

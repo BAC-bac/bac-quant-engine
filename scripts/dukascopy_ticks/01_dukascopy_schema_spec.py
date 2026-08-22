@@ -11,6 +11,13 @@ It documents the target structure before we build the downloader and normaliser.
 from pathlib import Path
 from pprint import pprint
 
+from dukascopy_contract import (
+    NORMALISATION_SCHEMA_VERSION,
+    SYMBOL_METADATA_SCHEMA_VERSION,
+    certified_symbols,
+    registry_payload,
+)
+
 
 # =============================================================================
 # PROJECT PATHS
@@ -29,9 +36,7 @@ ANALYSIS_DUKASCOPY_ROOT = DATA_ROOT / "analysis" / "dukascopy_ticks"
 
 SOURCE_NAME = "dukascopy"
 
-INITIAL_SYMBOLS = [
-    "EURUSD",
-]
+INITIAL_SYMBOLS = list(certified_symbols())
 
 INITIAL_TEST_DATES = [
     "2024-01-02",  # normal trading day, avoid weekend/holiday for first test
@@ -67,6 +72,12 @@ BACQE_TICK_SCHEMA = {
     "bid_volume": "float64",
     "ask_volume": "float64",
     "quote_volume": "float64",
+    "normalisation_schema_version": "string",
+    "symbol_metadata_version": "string",
+    "raw_price_scale": "int64",
+    "point_size": "float64",
+    "pip_size": "float64",
+    "coverage_status": "string",
 }
 
 
@@ -107,15 +118,7 @@ PROCESSED_STORAGE_PATTERN = (
 # SYMBOL METADATA
 # =============================================================================
 
-SYMBOL_METADATA = {
-    "EURUSD": {
-        "pip_size": 0.0001,
-        "point_size": 0.00001,
-        "asset_class": "fx",
-        "base_currency": "EUR",
-        "quote_currency": "USD",
-    }
-}
+SYMBOL_METADATA = registry_payload()
 
 
 def print_schema_summary() -> None:
@@ -145,6 +148,8 @@ def print_schema_summary() -> None:
     pprint(DERIVED_COLUMNS)
 
     print("\n[SYMBOL METADATA]")
+    print(f"Metadata schema:      {SYMBOL_METADATA_SCHEMA_VERSION}")
+    print(f"Normalisation schema: {NORMALISATION_SCHEMA_VERSION}")
     pprint(SYMBOL_METADATA)
 
     print("\n[STORAGE PATTERNS]")
